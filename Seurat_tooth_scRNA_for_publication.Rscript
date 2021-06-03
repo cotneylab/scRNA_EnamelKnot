@@ -1,0 +1,908 @@
+library(Seurat)
+library(ggplot2)
+library(magrittr)
+library(harmony)
+library(DESeq2)
+library(SingleCellExperiment)
+library(patchwork)
+library(ggrepel)
+library(wordcloud)
+library(RColorBrewer)
+library(eulerr)
+library(wordcloud2)
+library(tm)
+library("clusterProfiler")
+library("gplots")
+library("devtools")
+library("dplyr")
+library("ggplot2")
+library("AnnotationDbi")
+library("BiocParallel")
+library("RColorBrewer")
+library("org.Mm.eg.db")
+library(enrichplot)
+library("ggupset")
+library(ggsignif)
+library(gplots)
+library(reshape)
+library(ggvenn)
+library(readxl)
+set.seed(123)
+
+files<-list.files(path=".", pattern="_for_integration.rds")
+flw<-vector("list", length(files))
+for (filename in files){
+flw[[filename]]<-gsub("_for_integration.rds", "", filename)
+name<-readRDS(file=filename)
+assign(flw[[filename]], name)
+}
+
+name<-merge(molar_1, y=c(molar_4, molar_7, molar_9), add.cell.ids=c("molar_1", "molar_4", "molar_7", "molar_9"), project="tooth")
+name$orig.ident<-gsub("_A.*|_T.*|_G.*|_C.*", "", colnames(name))
+name[["percent.mt"]]<-PercentageFeatureSet(name, pattern="^mt-")
+z<-print(VlnPlot(name, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, split.by="orig.ident", cols=c("Red", "Yellow", "Pink", "Orange")))
+name <- subset(name, subset = nFeature_RNA > 200 & percent.mt < 5 )
+name <- NormalizeData(name)
+name <- FindVariableFeatures(name, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(name), 20)
+all.genes <- rownames(name)
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+m.s.genes <- convertHumanGeneList(cc.genes.updated.2019$s.genes)
+m.g2m.genes <- convertHumanGeneList(cc.genes.updated.2019$g2m.genes)
+name<-CellCycleScoring(name, s.features=m.s.genes, g2m.features=m.g2m.genes, set.ident=TRUE)
+tooth <- ScaleData(name, features = rownames(name))
+tooth <- RunPCA(tooth, features = VariableFeatures(name))
+pdf(file="SupplementalFigure1.pdf")
+print(tooth[["pca"]], dims = 1:5, nfeatures = 5)
+VizDimLoadings(tooth, dims = 1:2, reduction = "pca")
+DimPlot(tooth, reduction = "pca")
+DimHeatmap(tooth, dims = 1, cells = 500, balanced = TRUE)
+DimHeatmap(tooth, dims = 1:15, cells = 500, balanced = TRUE)
+tooth <- JackStraw(tooth, num.replicate = 100)
+tooth <- ScoreJackStraw(tooth, dims = 1:20)
+JackStrawPlot(tooth, dims = 1:15)
+ElbowPlot(tooth)
+tooth <- FindNeighbors(tooth, dims = 1:15)
+tooth <- FindClusters(tooth, resolution = 0.4)
+tooth <- RunUMAP(tooth, dims = 1:15)
+plot1<-VariableFeaturePlot(name) + theme(aspect.ratio = 1)
+top10 <- head(VariableFeatures(name), 20)
+p<-LabelPoints(plot = plot1, points = top10, repel = TRUE) + theme(aspect.ratio = 1)
+p
+dev.off()
+saveRDS(tooth, file = "1_tooth_with_rep_data_original_cluster_numbers.rds")
+
+tooth$Idents<-tooth$seurat_clusters
+pct<-table(tooth$Idents, tooth$orig.ident)
+pct<-as.data.frame(pct)
+
+n<-z + scale_fill_manual(values=c("Red", "Yellow", "Pink", "Orange"))
+p6<-DimPlot(tooth, reduction = "umap", group.by="seurat_clusters", pt.size=1) + theme(aspect.ratio = 1) + theme(legend.text=element_text(size=20), axis.text=element_text(size=12))
+p7<-DimPlot(tooth, reduction = "umap", split.by = "orig.ident", ncol=2)+ theme(aspect.ratio = 1) + theme(legend.text=element_text(size=20), axis.text=element_text(size=12)) 
+p8<-ggplot(pct, aes(x = Var1, y = Freq, fill = Var2)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Cluster") + ylab("Proportion per Replicate") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12))+ theme(aspect.ratio = 1) + theme(legend.text=element_text(size=12)) + scale_fill_manual(values=c("Red", "Yellow", "Pink", "Orange"))
+p9<-ggplot(pct, aes(x = Var2, y = Freq, fill = Var1)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Replicate") + ylab("Proportion per Cluster") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12))+ theme(aspect.ratio = 1) + theme(legend.text=element_text(size=12))
+pdf(file="Figure1.pdf", height=12, width=18)
+n/(p6|p9|p8)
+dev.off()
+jpeg(file="Figure1.jpg", height=1200, width=1500)
+n/(p6|p9|p8)
+dev.off()
+
+
+pdf(file="per_sample_cluster_percents_original_cluster_numbers.pdf", height=10, width=10)
+f<-ggplot(pct, aes(x = Var2, y = Freq, fill = Var1)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Sample") + ylab("Proportion") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+(p6 | p7) /(p8 | f) 
+dev.off()
+jpeg(file="per_sample_cluster_percents_original_cluster_numbers.jpg")
+(p6 | p7) /(p8 | f) 
+dev.off()
+
+
+write.table(rownames(tooth), file="~/cotney/analysis/scrna/e14_molar/for_publication/Supplemental_Table_BackgroundGenes.txt")
+write.table(rownames(tooth), file="~/cotney/analysis/scrna/e14_molar/for_publication/background.txt")
+write.table(rownames(tooth), file="~/cotney/analysis/scrna/e14_molar/for_publication/SupplementalTable2.txt")
+tooth.markers <- FindAllMarkers(tooth, group.by="seurat_clusters", only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.50, slot = "counts", max.cells.per.ident=400)
+tooth.markers<-subset(tooth.markers, avg_logFC > 0.50)
+write.table(tooth.markers, file="SupplementalTable1.tsv", sep="\t")
+
+
+x<-levels(unique(tooth$seurat_clusters))
+f<-c()
+flw<-vector("list", length(x))
+background <- bitr(rownames(tooth), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+data2<-NULL
+for (val in x){
+print(val)
+#flw[[val]]<-FindMarkers(tooth, ident.1 = val, test.use = "DESeq2", min.pct=0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+#flw[[val]]<-subset(flw[[val]], avg_logFC > 0.50)
+flw[[val]]<-read.table(file=(gsub("/", "_", gsub(" ", "", paste("tooth_clustermarkers", val, ".txt", sep="")))))
+assign(gsub(" |\\+", "", paste("clustermarkers", val, sep="")), flw[[val]])
+y<-as.data.frame(get(paste("clustermarkers", val, sep="")))
+n<-tail(y[order(y$avg_logFC),], 10)
+f<-rbind(f, n)
+value <- bitr(rownames(y), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+value_bp <- enrichGO(gene = value$ENTREZID,
+                      universe = background$ENTREZID,
+                      OrgDb = org.Mm.eg.db, 
+                      keyType = 'ENTREZID',
+                      readable = T,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+l<-upsetplot(value_bp) + ggtitle(paste("Cluster", val, " Genes BP"))
+value_bp1<-simplify(value_bp, cutoff=0.5, by="qvalue")
+value_bp1<-as.data.frame(value_bp1)
+v1<-as.data.frame(value_bp1[, 6])
+v1$V3<-value_bp1$Description
+v1<-head(v1, 16)
+colnames(v1)<-c(paste("Cluster", val, sep="_"), "ID")
+assign(paste("Cluster", val, sep="_"), v1)
+assign(paste("cluster", val, sep=""), l)
+write.table(data.frame(flw[[val]]), file=(gsub("/", "_", gsub(" ", "", paste("tooth_clustermarkers", val, ".txt", sep="")))), sep="\t")
+wcdf<-read.table(text=value_bp$GeneRatio, sep = "/")[1]
+wcdf$qval<- -log10(value_bp$qvalue)
+wcdf$term<-value_bp[,2]
+wordcloud(words = wcdf$term, freq = wcdf$qval, max.words=200, min.freq = 5, rot.per=0.45, random.order=FALSE, colors=colorRampPalette(c("grey","red"))(n = 10))
+gowords <- paste(wcdf$term, collapse = ' ')
+docs <- Corpus(VectorSource(gowords))
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words, stringsAsFactors = FALSE)
+head1<-df[1,1]
+print(head1)
+data<-as.data.frame(WhichCells(object=tooth, ident=val))
+data[,2]<-value_bp1[1,2]
+colnames(data)<-c("Cell", "GO")
+data2<-rbind(data2, data)
+v3<-strsplit(value_bp1[1,8], "/")
+assign(paste(gsub(" |-", "", value_bp1[1,2]), "GOModule", sep=""), v3)
+}
+rm("ribonucleoproteincomplexbiogenesisGOModule", "RNAsplicingGOModule")
+data<-as.data.frame(WhichCells(object=tooth, ident=c("4", "12")))
+data[,2]<-c("chromosome segregation")
+colnames(data)<-c("Cell", "GO")
+data2<-data2[ ! data2$Cell %in% data$Cell,]
+data2<-rbind(data, data2)
+rownames(data2)<-data2[,1]
+tooth<-AddMetaData(tooth, metadata=data2)
+tooth$Cell<-NULL
+pdf(file="test.pdf")
+DimPlot(tooth, group.by="GO") + theme(aspect.ratio = 1) + labs(title = "") 
+dev.off()
+
+
+
+
+
+
+
+tooth<-RenameIdents(tooth, `0`="Mesenchyme", `1`="Mesenchyme", `2`='Mesenchyme', `3`='Mesenchyme', `4`='Epithelium', `5`='Mesenchyme', `6`='Epithelium', `7`='Mesenchyme', `8`='Epithelium', `9`='Red Blood Cells', `10`='Mesenchyme', `11`='Endothelium', `12`='Epithelium', `13`='Other Blood Cells', `14`='Epithelium', `15`='Perivascular Cells')
+tooth$idents<-Idents(tooth)
+nodes<-ls(pattern="GOModule")
+for (node in nodes){
+mod<-get(node)
+mod<-intersect(mod[[1]], rownames(tooth))
+modulename<-gsub("GOModule|-", "", node)
+tooth<-AddModuleScore(object=tooth, features=list(mod), bins=1, control=1000, name = modulename, seed = 1, search = TRUE)
+}
+
+p<-DimPlot(tooth, reduction = "umap", group.by="seurat_clusters") + theme(aspect.ratio = 1)
+allmods<-gsub("GOModule|-", "", paste(ls(pattern="GOModule"), "1", sep=""))
+pdf(file="GO_module_scores.pdf", height=15, width=20)
+FeaturePlot(tooth, features=allmods, cols=c('white', 'red'), ncol=4)
+DotPlot(tooth, features=allmods, group.by="seurat_clusters", cols=c('white', 'red')) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + labs(y="Cluster Classification", x="GO-Based Gene Module")
+dev.off()
+
+table<-read.table("williams_marker_table.txt", header=TRUE, sep="\t")
+nodes<-unique(table$cluster)
+for (node in nodes){
+y<-subset(table, table$cluster == node)
+y<-subset(y, y$avg_logFC > 1)
+y<-y$gene
+write.table(y, paste("Module", gsub(" ", "", node), "markergenes.txt", sep=""), sep="\t")
+assign(paste("Module", node, sep=""), y)
+}
+
+table=data.frame(read_excel("41467_2020_18512_MOESM4_ESM.xls"))
+rownames(table)<-table[,1]
+table<-table[,-1]
+colnames(table)<-gsub("paste..M...phi..sep.........", "cluster", gsub("cluster..", "", colnames(table)))
+table$gene.module<-NULL
+nodes<-colnames(table)
+for (node in nodes){
+y<-table[order(table[[node]]),]
+#y<-rownames(tail(y, 20))
+y<-rownames(subset(y, y[[node]] > 1))
+write.table(y, paste("Module", node, "markergenes.txt", sep=""), sep="\t")
+assign(paste("Module", node, sep=""), y)
+}
+write.table(append(ModuleAmelo, c(ModuleOEE, ModuleSI_SR)), file="ModuleEpithelium.txt", sep="\t")
+write.table(append(ModuleDPC, c(ModuleE.pulp, ModulePre.od, ModuleDPCP, ModuleOsteo, ModuleDPC.C)), file="ModuleMesenchyme.txt", sep="\t")
+write.table(append(ModuleGlia, c(ModulePVC, ModuleVSMC)), file="ModulePerivascular.txt", sep="\t")
+write.table(append(ModuleInnate, c(Modulecluster9, Modulecluster10, ModuleLymph)), file="ModuleImmune.txt", sep="\t")
+write.table(ModuleEndo, file="ModuleEndothelium.txt", sep="\t")
+
+
+table<-read.table(file="Epithelium_Incisor_Paper_DevBioPaper.txt", sep="\t")
+nodes<-levels(unique(table$V2))
+for (node in nodes){
+y<-table[table$V2 == node,]
+write.table(y$V1, paste("Module", gsub('\\(|\\/', '_', gsub(" |\\)", "", node)), "markergenes.txt", sep=""), sep="\t")
+}
+
+pdf(file="Supplement_sc_incisor_module_scores.pdf", height=8.5, width=16)
+p<-DimPlot(tooth, reduction = "umap", group.by="idents") + theme(aspect.ratio = 1)
+nodes<-c("ModuleEndothelium.txt", "ModulePerivascular.txt", "ModuleImmune.txt", "ModuleMesenchyme.txt", "ModuleEpithelium.txt")
+for (node in nodes){
+mod<-read.table(file=node, header=TRUE, sep="\t")
+mod<-intersect(rownames(tooth), mod$x)
+print(node)
+print(length(mod))
+modulename<-gsub(".txt", "", gsub("Module", "", node))
+tooth<-AddModuleScore(object=tooth, features=list(mod), bins=1, control=1000, name = modulename, seed = 1, search = TRUE)
+p<-DimPlot(tooth, reduction = "umap", group.by="idents", pt.size=0.5) + theme(aspect.ratio = 1)
+f<-FeaturePlot(tooth, features =paste(modulename, "1", sep=""), cols=c('white', 'blue')) + theme(aspect.ratio = 1) + labs(title = "") 
+g<-VlnPlot(tooth, features =paste(modulename, "1", sep=""), slot = "counts", log = TRUE, group.by="idents") + geom_boxplot(width=0.1,fill="white") + theme(aspect.ratio = 1) + labs(title = modulename) + geom_signif(comparisons = list(c("Mesenchyme", "Epithelium"), c("Enamel Knot", "Mesenchyme"), c("Mesenchyme", "Endothelium"), c("Mesenchyme", "Perivascular Cells"), c("Mesenchyme", "Other Blood Cells"), c("Mesenchyme", "Red Blood Cells")), map_signif_level = TRUE, textsize = 4, annotation="*")
+print((p | f | g)+ plot_annotation(modulename))
+assign(paste(modulename, "module", sep=""), mod)
+}
+dev.off()
+
+jpeg(file="Supplement_sc_incisor_module_scores.jpg")
+p<-DimPlot(tooth, reduction = "umap", group.by="idents") + theme(aspect.ratio = 1)
+nodes<-c("ModuleEndothelium.txt", "ModulePerivascular.txt", "ModuleImmune.txt", "ModuleMesenchyme.txt", "ModuleEpithelium.txt")
+for (node in nodes){
+mod<-read.table(file=node, header=TRUE, sep="\t")
+mod<-intersect(rownames(tooth), mod$x)
+print(node)
+print(length(mod))
+modulename<-gsub(".txt", "", gsub("Module", "", node))
+tooth<-AddModuleScore(object=tooth, features=list(mod), bins=1, control=1000, name = modulename, seed = 1, search = TRUE)
+p<-DimPlot(tooth, reduction = "umap", group.by="idents", pt.size=0.5) + theme(aspect.ratio = 1)
+f<-FeaturePlot(tooth, features =paste(modulename, "1", sep=""), cols=c('white', 'blue')) + theme(aspect.ratio = 1) + labs(title = "") 
+g<-VlnPlot(tooth, features =paste(modulename, "1", sep=""), slot = "counts", log = FALSE, group.by="idents") + geom_boxplot(width=0.1,fill="white") + theme(aspect.ratio = 1) + labs(title = modulename) + geom_signif(comparisons = list(c("Mesenchyme", "Epithelium"), c("Enamel Knot", "Mesenchyme"), c("Mesenchyme", "Endothelium"), c("Mesenchyme", "Perivascular Cells"), c("Mesenchyme", "Other Blood Cells"), c("Mesenchyme", "Red Blood Cells")), map_signif_level = TRUE, textsize = 4, annotation="*")
+print((p | f | g)+ plot_annotation(modulename))
+assign(paste(modulename, "module", sep=""), mod)
+}
+dev.off()
+
+
+tooth$Epithelium<-tooth$Epithelium1
+tooth$Mesenchyme<-tooth$Mesenchyme1
+tooth$Perivascular<-tooth$Perivascular1
+tooth$Endothelium<-tooth$Endothelium1
+tooth$Immune<-tooth$Immune1
+
+standardmarkers<-c('Msx1', "Pitx2", 'Hba-a1', "Cdh5", "Fcer1g", "Metrn")
+p7<-DimPlot(tooth, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+a1 <- FeaturePlot(tooth, features = 'Msx1') + theme(aspect.ratio = 1)
+a2 <- FeaturePlot(tooth, features = 'Pitx2') + theme(aspect.ratio = 1)
+a3 <- FeaturePlot(tooth, features = 'Hba-a1') + theme(aspect.ratio = 1)
+a4 <- FeaturePlot(tooth, features = 'Cdh5') + theme(aspect.ratio = 1)
+a5 <- FeaturePlot(tooth, features = 'Fcer1g') + theme(aspect.ratio = 1)
+a6 <- FeaturePlot(tooth, features = 'Metrn') + theme(aspect.ratio = 1)
+a7<-FeaturePlot(tooth, features=standardmarkers, ncol=2, coord.fixed=TRUE)
+f <- DimPlot(tooth, reduction="umap", group.by="idents", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) & theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1, legend.position="none")
+g <- DimPlot(tooth, group.by="GO", pt.size=1.5,, cols=c("#636B59", "#CDE2B8", "#90A5A9", "#00A36C", "#00FFFF", "#228B22", "#7CFC00", "#0000FF", "#088F8F", "#0096FF", "#B4C424", "#C4B454", "#DFFF00", "#96DED1")) + theme(legend.text=element_text(size=15), legend.position="right") + theme(aspect.ratio = 1)
+h <- DotPlot(tooth, features = c("Mesenchyme", "Epithelium", "Endothelium", "Immune", "Perivascular"), group.by="idents", cols=c("red", "blue"), dot.scale=10) + theme(aspect.ratio = 1)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=20), axis.text.y=element_text(size=20)) + labs(y="Cluster Classification", x="Gene Module from Adult Incisor") 
+pdf(file="Figure2.pdf", height=20, width=20)
+#(p7|g)/((a1|a2|a3)/(a4|a5|a6))/(f|h)q
+#((p7/g)|((a1|a2)/(a3|a4)))/(f|h)
+#(p7/g/f)|(((a1|a2)/(a3|a4)/(a5|a6))/h)
+(p7/g/f)|(a7/h)
+dev.off()
+jpeg(file="Figure2.jpg", height=2000, width=2000)
+(p7/g/f)|(a7/h)
+dev.off()
+
+
+standardmarkers<-c('Msx2', "Barx1", 'Fgf4', "Bmp4", 'Lef1', "Wnt6", "Fgf3")
+p7<-DimPlot(tooth, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=14) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+a<- FeaturePlot(tooth, features = standardmarkers, ncol=3, combine = TRUE, coord.fixed=TRUE)
+b<-VlnPlot(tooth, features = standardmarkers, slot = "counts", log = FALSE, group.by="seurat_clusters", ncol=3) + theme(aspect.ratio = 1)
+f <- DimPlot(tooth, reduction="umap", group.by="idents", pt.size=1.5, label.size=14) & theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+g <- DotPlot(tooth, group.by="seurat_clusters", features=standardmarkers) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+pdf(file="SupplementalFigure2.pdf", height=15, width=25)
+g|a
+dev.off()
+jpeg(file="SupplementalFigure2.jpg", height=1500, width=2500)
+g|a
+dev.off()
+
+
+tooth[["RNA"]]@counts<-as.matrix(tooth[["RNA"]]@counts)+1
+saveRDS(tooth, file = "2_tooth_with_rep_data_renamed.rds")
+
+
+
+
+
+enamel<-subset(tooth, idents=c("Epithelium"))
+enamel$Endothelium1<-NULL
+enamel$Epithelium1<-NULL
+enamel$Perivascular1<-NULL
+enamel$Immune1<-NULL
+enamel$Mesenchyme1<-NULL
+enamel$Endothelium<-NULL
+enamel$Epithelium<-NULL
+enamel$Perivascular<-NULL
+enamel$Immune<-NULL
+enamel$Mesenchyme<-NULL
+enamel <- FindNeighbors(enamel, dims = 1:15)
+enamel <- FindClusters(enamel, resolution = 0.2)
+enamel <- RunUMAP(enamel, dims = 1:15)
+Idents(enamel)<-enamel$seurat_clusters
+saveRDS(enamel, file = "3_epithelium_only_numbered_clusters.rds")
+
+enamel.markers <- FindAllMarkers(enamel, only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+enamel.markers<-subset(enamel.markers, avg_logFC > 0.5)
+write.table(enamel.markers, file="Supplemental_Table_AllEpitheliumMarkers.tsv", sep="\t")
+
+enamel<-RenameIdents(enamel, `0`="Epithelium", `1`="Epithelium", `2`="Epithelium", `3`="Epithelium", `4`="Epithelium", `5`= "Epithelium", `6`="Epithelium", `7`="Enamel Knot")
+
+pct<-table(enamel$Phase, enamel$idents)
+pct<-as.data.frame(pct)
+pct<-subset(pct, Freq > 0)
+pdf(file="SupplementalFigure3.pdf")
+c<-ggplot(pct, aes(x = Var2, y = Freq, fill = Var1)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Cluster") + ylab("Phase") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme(aspect.ratio = 1)
+d<-ggplot(pct, aes(x = Var1, y = Freq, fill = Var2)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Phase") + ylab("Cluster") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme(aspect.ratio = 1)
+d | c
+dev.off()
+
+enamel.markers <- FindAllMarkers(enamel, only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+enamel.markers<-subset(enamel.markers, avg_logFC > 0.5)
+
+temp<-subset(enamel, idents = "Enamel Knot")
+ekexpression<-as.data.frame(AverageExpression(temp, features = rownames(temp), return.seurat = FALSE, verbose = TRUE))
+ekexpression$Gene<-rownames(ekexpression)
+colnames(ekexpression)<-c("expression", "Gene")
+ekexpression<-subset(ekexpression, expression > 0)
+ekexpression<-ekexpression[order(ekexpression$expression),]
+ekexpression<-rownames(subset(ekexpression, expression > 0))
+write.table(ekexpression, file="ek_all_genes.txt")
+
+
+bite<-read.table(file="biteit_enamelknot_genes.txt")
+bite<-bite$V1
+ekjax<-read.table(file="JAX_enamelknot_genes.txt")
+ekjax<-ekjax$V1
+pekjax<-read.table(file="JAX_primaryenamelknot_genes.txt")
+pekjax<-pekjax$V1
+jax<-read.table(file="JAX_budstage_genes.txt", sep="\t", header=TRUE)
+jax<-jax$Gene.Symbol
+jaxcap<-read.table(file="JAX_capstage_genes.txt", sep="\t", header=TRUE)
+jaxcap<-jaxcap$Gene.Symbol
+jax<-union(jax, jaxcap)
+allgenes<-read.table(file="background.txt")
+allgenes<-allgenes$x
+allpek<-union(pekjax, bite)
+jax<-union(jax, allpek)
+
+enamel<-AddModuleScore(object=enamel, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
+
+enamel$idents<-Idents(enamel)
+standardmarkers<-c("Shh", 'Cdkn1a', "Lef1", 'Wnt6', 'Fgf3')
+standardmarkers1<-c("Shh", 'Cdkn1a', "Lef1")
+
+
+my_cols <- c('6'='#c7be02','2'='#a8a32d','3'='#ABA300','0'='#524f08','4'='#adab7d', '7'='#f2ec5c','5'='#c7c595', '1'='#91906d')
+my_cols2 <- my_cols[order(as.integer(names(my_cols)))]
+scales::show_col(my_cols2)
+
+p6<-FeaturePlot(tooth, features = "KnownEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+
+p7<-DimPlot(enamel, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=14, cols=my_cols2) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+
+a1 <- FeaturePlot(enamel, features = "Shh", combine = TRUE, pt.size=2) + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+a2 <- FeaturePlot(enamel, features = "Wnt10b", combine = TRUE, pt.size=2) + theme(aspect.ratio = 1)
+a3 <- FeaturePlot(enamel, features = "Lef1", combine = TRUE) + theme(aspect.ratio = 1)
+a4 <- FeaturePlot(enamel, features = "Wnt6", combine = TRUE) + theme(aspect.ratio = 1)
+
+c<-ggplot(pct, aes(x = Var2, y = Freq, fill = Var1)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Cluster") + ylab("Phase") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme(aspect.ratio = 1, axis.text=element_text(size=20))
+
+f <- DimPlot(enamel, reduction="umap", group.by="idents", pt.size=1.5, label.size=8, label=TRUE, cols = c('Enamel Knot' = 'red', 'Epithelium' ='#ABA300')) & theme(legend.text=element_text(size=20), legend.position="none") + theme(aspect.ratio = 1)
+
+#g <- DotPlot(enamel, features = standardmarkers, group.by="seurat_clusters") + theme(aspect.ratio = 1) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+h<-FeaturePlot(enamel, features = "KnownEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+
+i<-VlnPlot(enamel, features = "KnownEK1", slot = "counts", log = FALSE, group.by="seurat_clusters", pt.size = 0.05, cols=my_cols2) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("7", "2"), c('7', '1'), c('7', '3'), c('7', '4'), c('7', '5'), c('7', '6'), c('7', '0')), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6)
+
+j<-VlnPlot(tooth, features = "KnownEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ geom_signif(comparisons = list(c("Mesenchyme", "Epithelium"), c("Epithelium", "Endothelium"), c("Epithelium", "Other Blood Cells"), c("Epithelium", "Red Blood Cells"), c("Epithelium", "Perivascular Cells")), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6) 
+
+
+pdf(file="Figure3.pdf", height=25, width=20)
+(p6|j)/(p7|h|i)/(a1|a2|f)
+dev.off()
+jpeg(file="Figure3.jpg", height=2500, width=2000)
+(p6|j)/(p7|h|i)/(a1|a2|f)
+dev.off()
+
+
+saveRDS(enamel, file = "4_epithelium_only_renamed_clusters.rds")
+
+
+
+
+enamelknotcells<-WhichCells(object=enamel, ident="Enamel Knot")
+Idents(tooth, cells = enamelknotcells)<-"Enamel Knot"
+tooth$idents<-Idents(tooth)
+
+levels<-data.frame(Idents(tooth))
+x<-unique(levels$Idents)
+flw<-vector("list", length(x))
+for (val in x){
+flw[[val]]<-FindMarkers(tooth, ident.1 = val, test.use = "DESeq2", min.pct=0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+flw[[val]]<-subset(flw[[val]], avg_logFC > 0.5)
+temp<-subset(tooth, idents = val)
+expression<-AverageExpression(temp, features = rownames(temp), return.seurat = FALSE, verbose = TRUE)
+assign(gsub(" |\\+", "", paste("clustermarkers", val, sep="")), flw[[val]])
+write.table(data.frame(flw[[val]]), file=(gsub("/", "_", gsub(" ", "", paste("tooth_clustermarkers_renamed_clusters_all", val, ".txt", sep="")))), sep="\t")
+write.table(data.frame(expression), file=(gsub("/", "_", gsub(" ", "", paste("averageexpression", val, ".txt", sep="")))), sep="\t")
+}
+
+tooth.markers <- FindAllMarkers(tooth, only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+tooth.markers<-subset(tooth.markers, avg_logFC > 0.5)
+write.table<-(tooth.markers, file="Supplemental_Table_5_AllMarkers_Renamed_Clusters_withEK.tsv", sep="\t")
+tooth.marker.genes<-rownames(tooth.markers)
+
+
+EKmarkers<-read.table("tooth_clustermarkers_renamed_clusters_allEnamelKnot.txt")
+
+ekmarkers<-rownames(EKmarkers[order(EKmarkers$avg_logFC),])
+
+bite<-read.table(file="biteit_enamelknot_genes.txt")
+bite<-bite$V1
+
+topekmarkers<-rownames(EKmarkers[EKmarkers$avg_logFC > 1,])
+
+ekexpression<-read.table(file="ek_all_genes.txt")
+ekexpression<-ekexpression$x
+ekjax<-read.table(file="JAX_enamelknot_genes.txt")
+ekjax<-ekjax$V1
+pekjax<-read.table(file="JAX_primaryenamelknot_genes.txt")
+pekjax<-pekjax$V1
+jax<-read.table(file="JAX_budstage_genes.txt", sep="\t", header=TRUE)
+jax<-jax$Gene.Symbol
+jaxcap<-read.table(file="JAX_capstage_genes.txt", sep="\t", header=TRUE)
+jaxcap<-jaxcap$Gene.Symbol
+jax<-union(jax, jaxcap)
+allgenes<-read.table(file="background.txt")
+allgenes<-allgenes$x
+
+allpek<-union(pekjax, bite)
+jax<-union(jax, allpek)
+
+write.table(jax, "SupplementalTable5.txt")
+venn<-list(bite, ekmarkers, topekmarkers, ekexpression, ekjax, pekjax, jax, jaxcap, allgenes, allpek)
+names(venn)[1]<-c("Bite-It Known EK Genes")
+names(venn)[2]<-c("EK Markers")
+names(venn)[3]<-c("Top EK Markers")
+names(venn)[4]<-c("All Identified EK Genes")
+names(venn)[5]<-c("JAX All EK Genes")
+names(venn)[6]<-c("JAX All Primary EK Genes")
+names(venn)[7]<-c("JAX Known Bud and Cap Stage Genes")
+names(venn)[8]<-c("JAX Known Cap Stage Genes")
+names(venn)[9]<-c("All Identified Bud Stage Genes")
+names(venn)[10]<-c("All Known EK Genes")
+d5<-ggvenn(venn, columns =c("All Known EK Genes", "Top EK Markers"))
+
+
+write.table(topekmarkers, file="SupplementalTable8.txt")
+novelekmarkers<-setdiff(ekmarkers, jax)
+
+tooth<-AddModuleScore(object=tooth, features=list(topekmarkers), pool = NULL, ctrl = 1000, name = "TopEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(ekmarkers), pool = NULL, ctrl = 1000, name = "AllEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(novelekmarkers), pool = NULL, ctrl = 1000, name = "NovelEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
+
+pdf(file="Supplemental_AllCombined_UMAPAllKnownEKGenes.pdf", height=10, width=10)
+for (featurename in jax){
+print(FeaturePlot(tooth, features = featurename) + theme(aspect.ratio = 1))
+}
+dev.off()
+saveRDS(tooth, file = "FINAL_tooth_with_rep_data_renamed_clusters_EK_module_score.rds")
+
+
+
+ekmarkers<-read.table(file="tooth_clustermarkers_renamed_clusters_allEnamelKnot.txt")
+EnamelKnotTop<-subset(ekmarkers, ekmarkers$avg_logFC >= 1.0)
+EnamelKnotTop<-EnamelKnotTop[order(EnamelKnotTop$avg_logFC),]
+topekmarkers<-rownames(EnamelKnotTop)
+topEK<-tail(topekmarkers, 6)
+novelekmarkers<-setdiff(rownames(ekmarkers), jax)
+value <- bitr(rownames(ekmarkers), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+value_bp <- enrichGO(gene = value$ENTREZID,
+                      universe = background$ENTREZID,
+                      OrgDb = org.Mm.eg.db, 
+                      keyType = 'ENTREZID',
+                      readable = T,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+write.table(ekmarkers, file="SupplementalTable6.txt")
+write.table(as.data.frame(value_bp), file="SupplementalTable7.txt")
+value1 <- bitr(topekmarkers, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+value_bp1 <- enrichGO(gene = value1$ENTREZID,
+                      universe = background$ENTREZID,
+                      OrgDb = org.Mm.eg.db, 
+                      keyType = 'ENTREZID',
+                      readable = T,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+value2 <- bitr(novelekmarkers, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+value_bp2 <- enrichGO(gene = value2$ENTREZID,
+                      universe = background$ENTREZID,
+                      OrgDb = org.Mm.eg.db, 
+                      keyType = 'ENTREZID',
+                      readable = T,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+plott<-as.ggplot(upsetplot(value_bp)) + theme(aspect.ratio = 1)
+plot1<-upsetplot(value_bp1) + theme(aspect.ratio = 1)
+plot2<-upsetplot(value_bp2) + theme(aspect.ratio = 1)
+
+library(ggplotify)
+completely_contained <- euler(c("A" = length(setdiff(jax, ekmarkers)), "B" = length(setdiff(ekmarkers, jax)), "A&B" = (length(jax) - length(setdiff(jax, ekmarkers)))))
+p3<-as.ggplot(plot(completely_contained, labels = c("Known EK Genes", "All EK Marker Genes"), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
+p3<-p3+theme(aspect.ratio=1)
+
+
+p<-DimPlot(tooth, reduction = "umap", group.by="idents", pt.size=1.5, label=TRUE, label.size=10, repel=TRUE, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + theme(aspect.ratio = 1, legend.position="none", text=element_text(size=20))
+
+f<-FeaturePlot(tooth, features = "KnownEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score")  + theme(aspect.ratio = 1, text = element_text(size = 20))
+
+g<-VlnPlot(tooth, features = "KnownEK1", slot = "counts", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + ylim(-0.1,1.5)
+
+h<-FeaturePlot(tooth, features = "Bmp4", cols=c('white', "blue"), pt.size=1.5) + theme(aspect.ratio = 1, text = element_text(size = 20)) 
+
+f2<-FeaturePlot(tooth, features = "AllEK1", cols=c('white', "purple"), pt.size=1.5) + labs(title = "EK Marker Gene Module Score") + theme(aspect.ratio = 1, text = element_text(size = 20)) 
+
+g2<-VlnPlot(tooth, features = "AllEK1", slot = "counts", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "EK Marker Gene Module Score", x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ ylim(-0.1,1.5)
+data <- FetchData(tooth, vars = c('KnownEK1','AllEK1', 'idents'), slot = "counts") 
+#data<-data[data$idents == "Enamel Knot",]
+long_data <- melt(data)
+g3<-ggplot(long_data, aes(x = idents, y = value, fill=variable)) + geom_violin() + labs(title = "Module Scores of Known vs Marker EK Genes", x="Gene Module", y="Module Score") + scale_fill_manual(values=c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + theme(aspect.ratio = 1, text = element_text(size = 20)) + geom_signif(comparisons = list(c("AllEK1", "KnownEK1")), test = "wilcox.test", map_signif_level = TRUE, textsize = 6) 
+
+data <- FetchData(tooth, vars = c('KnownEK1','AllEK1', 'idents'), slot = "counts") 
+data<-data[data$idents == "Enamel Knot",]
+long_data <- melt(data)
+g4<-ggplot(long_data, aes(x = variable, y = value, fill=variable)) + geom_violin() + labs(title = "Module Scores in the Enamel Knot", x="Gene Module", y="Module Score") + stat_summary(fun.data=mean_sdl, geom="pointrange", color="black") + scale_fill_manual(values=c("red", "purple")) + theme(aspect.ratio = 1, legend.position = "none", text=element_text(size=20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("AllEK1", "KnownEK1")), test = "wilcox.test", map_signif_level = TRUE, textsize = 8)
+
+
+#plot4<-DotPlot(tooth, features = head(topekmarkers, 10)) + labs(title = "Top EK Marker Gene Expression") + theme(aspect.ratio = 1) 
+
+pdf(file="Figure4.pdf", height=15, width=35)
+#p|((f|g)/(f2|g2)/(p3|g4))
+p|(f/g)|(f2/g2)|(p3/g4)
+dev.off()
+jpeg(file="Figure4.jpg", height=1500, width=3500)
+p|(f/g)|(f2/g2)|(p3/g4)
+dev.off()
+
+write.table(jax, "SupplementalTable5.txt")
+venn<-list(bite, rownames(ekmarkers), topekmarkers, levels(ekexpression), ekjax, pekjax, jax, jaxcap, allgenes, jax)
+names(venn)[1]<-c("Bite-It Known EK Genes")
+names(venn)[2]<-c("All EK Markers")
+names(venn)[3]<-c("Top EK Markers")
+names(venn)[4]<-c("All Identified EK Genes")
+names(venn)[5]<-c("JAX All EK Genes")
+names(venn)[6]<-c("JAX All Primary EK Genes")
+names(venn)[7]<-c("JAX Known Bud and Cap Stage Genes")
+names(venn)[8]<-c("JAX Known Cap Stage Genes")
+names(venn)[9]<-c("All Identified Bud Stage Genes")
+names(venn)[10]<-c("All Known EK Genes")
+
+d7<-ggvenn(venn, columns =c("All Known EK Genes", "Top EK Markers"), set_name_size=6, text_size=4) + theme(text=element_text(size = 4), aspect.ratio=1)
+d6<-ggvenn(venn, columns =c("All Identified EK Genes", "All Known EK Genes"), set_name_size=6, text_size=4) + theme(text=element_text(size = 4), aspect.ratio=1)
+d5<-ggvenn(venn, columns =c("All Known EK Genes", "All EK Markers"), set_name_size=6, text_size=4) + theme(text=element_text(size = 4), aspect.ratio=1)
+ekmarkers<-rownames(ekmarkers)
+allgenes<-rownames(tooth)
+library(permute)
+d<-NULL
+for (i in 1:10000){
+markers<-sample(allgenes,335)
+d<-rbind(d, length(intersect(markers, jax)))
+}
+t<-table(d)
+d2<-NULL
+for (i in 1:10000){
+markers<-sample(allgenes,64)
+d2<-rbind(d2, length(intersect(markers, jax)))
+}
+t2<-table(d2)
+
+d3<-NULL
+for (i in 1:10000){
+markers<-sample(allgenes,21160)
+d3<-rbind(d3, length(intersect(markers, jax)))
+}
+t3<-table(d3)
+length(intersect(ekmarkers, jax))
+###p value is <0.0001, since the number is 38 and that NEVER appears in random sampling of 10,000 times
+pdf(file="SupplementalFigure4.pdf", height=8, width=24)
+p<-plot(t, xlim=c(1,40), main="Number of EK Genes From Random Sampling of 335 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(ekmarkers, jax)))
+p1<-plot(t2, xlim=c(1,40), main="Number of EK Genes From Random Sampling of 64 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(topekmarkers, jax)))
+p2<-plot(t3, xlim=c(90,140), main="Number of EK Genes From Random Sampling of 21160 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(ekexpression, jax)))
+(d5 + d6 + d7)
+(plot + plot1 + plot2)
+p
+p1
+dev.off()
+jpeg(file="SupplementalFigure4.jpg")
+(d5 + d6 + d7)
+(plot + plot1 + plot2)
+p
+p1
+dev.off()
+
+markers<-c("Shh", "Cdkn1a", "Wnt10a", "Bmp4", "Fgf3", "Gadd45g", "Lrp4", "Ltb", "Irx1", "Sp5", "Cd24a", "Spint2")
+pdf(file="SupplementalFigure5.pdf", height=11, width=8.5)
+for (marker in markers){
+f<-VlnPlot(tooth, features = marker, group.by='idents') + theme(aspect.ratio = 1)
+f1<-FeaturePlot(tooth, features = marker) + theme(aspect.ratio = 1)
+print(f/f1)
+}
+dev.off()
+
+
+standardmarkers<-c('Wnt10a', "Wnt10b", 'Msx1', "Bmp4", 'Lef1', "Wnt6", "Fgf3")
+p7<-DimPlot(tooth, reduction = "umap", group.by = "idents", pt.size=1.5, label.size=14) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+a<- FeaturePlot(tooth, features = standardmarkers, ncol=3, combine = TRUE, coord.fixed=TRUE)
+b<-VlnPlot(tooth, features = standardmarkers, slot = "counts", log = TRUE, group.by="idents", ncol=3) + theme(aspect.ratio = 1)
+f <- DimPlot(tooth, reduction="umap", group.by="idents", pt.size=1.5, label.size=14) & theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+g <- DotPlot(tooth, features = standardmarkers, group.by="idents") + theme(aspect.ratio = 1)
+pdf(file="SupplementalFigure3.pdf", height=15, width=15)
+(p7 | g) / a 
+dev.off()
+jpeg(file="SupplementalFigure3.jpg", height=1500, width=1500)
+(p7 | g) / a 
+dev.off()
+
+
+
+
+
+
+
+mesen<-subset(tooth, idents=c("Mesenchyme"))
+mesen <- FindNeighbors(mesen, dims = 1:15)
+mesen <- FindClusters(mesen, resolution = 0.2)
+mesen <- RunUMAP(mesen, dims = 1:15)
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+m.s.genes <- convertHumanGeneList(cc.genes.updated.2019$s.genes)
+m.g2m.genes <- convertHumanGeneList(cc.genes.updated.2019$g2m.genes)
+mesen<-CellCycleScoring(mesen, s.features=m.s.genes, g2m.features=m.g2m.genes, set.ident=FALSE)
+Idents(mesen)<-mesen$seurat_clusters
+saveRDS(mesen, file = "5_mesenchyme_only_numbered_clusters.rds")
+
+mesen.markers <- FindAllMarkers(mesen, only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+mesen.markers<-subset(mesen.markers, avg_logFC > 0.5)
+write.table(mesen.markers, file="Supplemental_Table_AllMesenchymeMarkers.tsv", sep="\t")
+
+mesen$idents<-Idents(mesen)
+pdf(file="Supplement_sc_incisor_module_scores_mesenchymesubclustering.pdf", height=8.5, width=16)
+p<-DimPlot(mesen, reduction = "umap", group.by="idents") + theme(aspect.ratio = 1)
+nodes<-list.files(pattern="Module")
+for (node in nodes){
+mod<-read.table(file=node, header=TRUE, sep="\t")
+print(head(mod))
+mod<-intersect(rownames(mesen), mod$x)
+print(node)
+print(length(mod))
+modulename<-gsub(".txt", "", gsub("Module", "", node))
+mesen<-AddModuleScore(object=mesen, features=list(mod), bins=1, control=1000, name = modulename, seed = 1, search = TRUE)
+p<-DimPlot(mesen, reduction = "umap", group.by="idents", pt.size=0.5) + theme(aspect.ratio = 1)
+f<-FeaturePlot(mesen, features =paste(modulename, "1", sep=""), cols=c('white', 'blue')) + theme(aspect.ratio = 1) + labs(title = "") 
+g<-VlnPlot(mesen, features =paste(modulename, "1", sep=""), slot = "counts", log = FALSE, group.by="idents") + geom_boxplot(width=0.1,fill="white") + theme(aspect.ratio = 1) + labs(title = modulename) + geom_signif(comparisons = list(c("1", "2"), c("1", "3"), c("1", "4"), c("1", "5"), c("1", "0"), c("0", "2")), map_signif_level = TRUE, textsize = 4, annotation="*")
+#print((p | f | g)+ plot_annotation(modulename))
+assign(paste(modulename, "module", sep=""), mod)
+}
+
+allmods<-paste(gsub("Module|.txt", "", nodes), "1", sep="")
+l<-DotPlot(mesen, features=allmods, group.by="idents", cols=c("blue", "red")) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + labs(y="Cluster Classification", x="Gene Module from Adult Incisor")
+l
+dev.off()
+
+x<-levels(unique(Idents(mesen)))
+f<-c()
+flw<-vector("list", length(x))
+background <- bitr(rownames(mesen), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+for (val in x){
+print(val)
+flw[[val]]<-FindMarkers(mesen, ident.1 = val, test.use = "DESeq2", min.pct=0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+flw[[val]]<-subset(flw[[val]], avg_logFC > 0.5)
+assign(gsub(" |\\+", "", paste("clustermarkers", val, sep="")), flw[[val]])
+y<-as.data.frame(get(gsub(" |\\+", "", paste("clustermarkers", val, sep=""))))
+n<-tail(y[order(y$avg_logFC),], 10)
+f<-rbind(f, n)
+value <- bitr(rownames(y), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+value_go <- enrichGO(gene = value$ENTREZID,
+                   universe = background$ENTREZID,
+                   OrgDb = org.Mm.eg.db, 
+                   keyType = 'ENTREZID',
+                   readable = T,
+                   ont = "ALL",
+                   qvalueCutoff = 0.05,
+                   pAdjustMethod = "bonferroni")
+value_bp <- enrichGO(gene = value$ENTREZID,
+                      universe = background$ENTREZID,
+                      OrgDb = org.Mm.eg.db, 
+                      keyType = 'ENTREZID',
+                      readable = T,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+l<-upsetplot(value_bp) + ggtitle(paste("Cluster", val, " Genes BP"))
+value_bp1<-simplify(value_bp, cutoff=0.99, by="p.adjust")
+value_bp1<-as.data.frame(value_bp1)
+v1<-as.data.frame(value_bp1[, 6])
+v1$V3<-value_bp1$Description
+v1<-head(v1, 20)
+colnames(v1)<-c(paste("Cluster", val, sep="_"), "ID")
+assign(gsub("/", "_", gsub(" ", "", paste("Cluster", val, sep=""))), v1)
+assign(gsub("/", "_", gsub(" ", "", paste("cluster", val, sep=""))), l)
+write.table(data.frame(flw[[val]]), file=(gsub("/", "_", gsub(" ", "", paste("mesen_clustermarkers", val, ".txt", sep="")))), sep="\t")
+}
+x<-Reduce(function(x, y) merge(x, y, by.x="ID", by.y="ID", all=TRUE), list(Cluster0, Cluster1, Cluster2, Cluster3, Cluster4, Cluster5))
+x[is.na(x)] <- 1
+rownames(x)<-x$ID
+x<-x[,2:7]
+x<-(-log10(x))
+library("ggplot2")
+library("ggdendro")
+library("grid")
+library("reshape2")
+library("pheatmap")
+pdf(file="allclusters_afterrenaming_withEK_geneontology_markergeneexpression_heatmap.pdf", height=15, width=20)
+print((cluster0 + cluster1 + cluster2) / (cluster3 + cluster4 + cluster5))
+myheatmap<-pheatmap(x,scale="row",show_rownames=TRUE)
+myheatmap
+DoHeatmap(mesen, features=f, group.by="idents")
+dev.off()
+
+mesen<-RenameIdents(mesen, `0`="Epithelium", `1`="Epithelium", `2`="Epithelium", `3`="Epithelium", `4`="Epithelium", `5`= "Epithelium", `6`="Epithelium", `7`="mesen Knot")
+EKmarkers<-FindMarkers(mesen, ident.1 = "mesen Knot", test.use = "DESeq2", min.pct = 0.25, logfc.threshold = 0.5, only.pos = TRUE, max.cells.per.ident=400)
+EKmarkersepi<-subset(EKmarkers, avg_logFC > 0.5)
+write.table(EKmarkersepi, file="EK_markers_epionly.txt", sep='\t')
+epimarkers<-FindMarkers(mesen, ident.1 = "Epithelium", test.use = "DESeq2", min.pct = 0.25, logfc.threshold = 0.5, only.pos = TRUE, max.cells.per.ident=400)
+epimarkers<-subset(epimarkers, avg_logFC > 0.5)
+write.table(epimarkers, file="epi_markers_epionly.txt", sep='\t')
+
+
+
+human_face_all<-readRDS(file="2_human_face_with_rep_data_renamed.rds")
+human_face<-subset(human_face_all, idents="Epithelium")
+human_face <- FindNeighbors(human_face, dims = 1:15)
+human_face <- FindClusters(human_face, resolution = 0.1)
+human_face <- RunUMAP(human_face, dims = 1:15)
+
+convertMouseGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+mousex <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(mousex))
+return(mousex)
+}
+nodes<-c("ModuleEndothelium.txt", "ModulePerivascular.txt", "ModuleImmune.txt", "ModuleMesenchyme.txt", "ModuleEpithelium.txt")
+for (node in nodes){
+mod<-as.data.frame(read.table(file=node, header=TRUE, sep="\t"))
+new<-convertMouseGeneList(mod$p_val)
+write.table(new, file=paste("Human", node, sep=""), sep="\t")
+}
+human_ekmarkers<-convertMouseGeneList(rownames(ekmarkers))
+
+human_face<-AddModuleScore(object=human_face, features=list(human_ekmarkers), pool = NULL, ctrl = 1000, name = "Human_EK", overwrite=TRUE, seed = 1, search = TRUE)
+
+pdf(file="Supplement_sc_incisor_based_module_scores_after_renaming.pdf", height=8.5, width=16)
+p<-DimPlot(human_face, reduction = "umap", group.by="Idents") + theme(aspect.ratio = 1)
+nodes<-list.files(pattern="HumanModule")
+for (node in nodes){
+mod<-read.table(file=node, header=TRUE, sep="\t")
+mod<-intersect(rownames(human_face), mod$x)
+print(node)
+print(length(mod))
+featurename<-gsub(".txt", "", gsub("HumanModule", "", node))
+modulename<-gsub(".txt", "", gsub("Human", "", node))
+human_face<-AddModuleScore(object=human_face, features=list(mod), bins=1, control=1000, name = featurename, seed = 1, search = TRUE)
+p<-DimPlot(human_face, reduction = "umap", group.by="seurat_clusters", pt.size=0.5) + theme(aspect.ratio = 1)
+f<-FeaturePlot(human_face, features =paste(featurename, "1", sep=""), cols=c('white', 'blue')) + theme(aspect.ratio = 1) + labs(title = "") 
+g<-VlnPlot(human_face, features =paste(featurename, "1", sep=""), slot = "counts", log = TRUE, group.by="seurat_clusters") + geom_boxplot(width=0.1,fill="white") + theme(aspect.ratio = 1) + labs(title = modulename) 
+print((p | f | g)+ plot_annotation(modulename))
+assign(modulename, mod)
+}
+allmods<-paste(gsub("HumanModule|.txt", "", nodes), "1", sep="")
+l<-DotPlot(human_face, features=allmods, group.by="seurat_clusters") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + labs(y="Cluster Classification", x="Gene Module from Adult Incisor")
+(p | l)
+dev.off()
+
+pdf(file="Figure9.pdf", height=10, width=25)
+s<-DimPlot(human_face_all, reduction = "umap", group.by="Idents", pt.size=2.5) + theme(aspect.ratio = 1)
+p<-DimPlot(human_face, reduction = "umap", group.by="seurat_clusters", pt.size=2.5) + theme(aspect.ratio = 1)
+f<-FeaturePlot(human_face, features = "Human_EK1", cols=c('white', 'red')) + theme(aspect.ratio = 1) + labs(title = "Module Score of Enamel Knot Marker Genes") 
+g<-VlnPlot(human_face, features = "Human_EK1", slot = "counts",  group.by="seurat_clusters", pt.size = 0.05, ) + geom_boxplot(width=0.1,fill="white") + theme(aspect.ratio = 1) + labs(title = "") + geom_signif(comparisons = list(c("0", "1")), map_signif_level = TRUE, test = "wilcox.test", textsize = 6)
+print((s/p)|((f|g)))
+dev.off()
+
+x<-levels(unique(Idents(human_face)))
+f<-c()
+flw<-vector("list", length(x))
+background <- bitr(rownames(human_face), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+for (val in x){
+print(val)
+flw[[val]]<-FindMarkers(human_face, ident.1 = val, test.use = "DESeq2", min.pct=0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+flw[[val]]<-subset(flw[[val]], avg_logFC > 0.5)
+assign(gsub(" |\\+", "", paste("clustermarkers", val, sep="")), flw[[val]])
+y<-as.data.frame(get(gsub(" |\\+", "", paste("clustermarkers", val, sep=""))))
+n<-tail(y[order(y$avg_logFC),], 10)
+f<-rbind(f, n)
+value <- bitr(rownames(y), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+value_go <- enrichGO(gene = value$ENTREZID,
+                   universe = background$ENTREZID,
+                   OrgDb = org.Hs.eg.db, 
+                   keyType = 'ENTREZID',
+                   readable = T,
+                   ont = "ALL",
+                   qvalueCutoff = 0.05,
+                   pAdjustMethod = "bonferroni")
+value_bp <- enrichGO(gene = value$ENTREZID,
+                      universe = background$ENTREZID,
+                      OrgDb = org.Hs.eg.db, 
+                      keyType = 'ENTREZID',
+                      readable = T,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+l<-upsetplot(value_bp) + ggtitle(paste("Cluster", val, " Genes BP"))
+value_bp1<-simplify(value_bp, cutoff=0.99, by="p.adjust")
+value_bp1<-as.data.frame(value_bp1)
+v1<-as.data.frame(value_bp1[, 6])
+v1$V3<-value_bp1$Description
+v1<-head(v1, 20)
+colnames(v1)<-c(paste("Cluster", val, sep="_"), "ID")
+assign(gsub("/", "_", gsub(" ", "", paste("Cluster", val, sep=""))), v1)
+assign(gsub("/", "_", gsub(" ", "", paste("cluster", val, sep=""))), l)
+#write.table(data.frame(flw[[val]]), file=(gsub("/", "_", gsub(" ", "", paste("mesen_clustermarkers", val, ".txt", sep="")))), sep="\t")
+}
+x<-Reduce(function(x, y) merge(x, y, by.x="ID", by.y="ID", all=TRUE), list(Cluster0, Cluster1, Cluster2))
+x[is.na(x)] <- 1
+rownames(x)<-x$ID
+x<-x[,2:4]
+x<-(-log10(x))
+library("ggplot2")
+library("ggdendro")
+library("grid")
+library("reshape2")
+library("pheatmap")
+pdf(file="allclusters_afterrenaming_withEK_geneontology_markergeneexpression_heatmap.pdf", height=15, width=20)
+print((cluster0 + cluster1 + cluster2))
+myheatmap<-pheatmap(x,scale="row",show_rownames=TRUE)
+myheatmap
+DoHeatmap(human_face, features=f, group.by="idents")
+dev.off()
+
