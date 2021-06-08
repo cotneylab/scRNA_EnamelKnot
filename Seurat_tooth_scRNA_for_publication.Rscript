@@ -295,14 +295,14 @@ a7<-FeaturePlot(tooth, features=standardmarkers, ncol=2, coord.fixed=TRUE)
 f <- DimPlot(tooth, reduction="umap", group.by="idents", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) & theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1, legend.position="none")
 g <- DimPlot(tooth, group.by="GO", pt.size=1.5,, cols=c("#636B59", "#CDE2B8", "#90A5A9", "#00A36C", "#00FFFF", "#228B22", "#7CFC00", "#0000FF", "#088F8F", "#0096FF", "#B4C424", "#C4B454", "#DFFF00", "#96DED1")) + theme(legend.text=element_text(size=15), legend.position="right") + theme(aspect.ratio = 1)
 h <- DotPlot(tooth, features = c("Mesenchyme", "Epithelium", "Endothelium", "Immune", "Perivascular"), group.by="idents", cols=c("red", "blue"), dot.scale=10) + theme(aspect.ratio = 1)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=20), axis.text.y=element_text(size=20)) + labs(y="Cluster Classification", x="Gene Module from Adult Incisor") 
-pdf(file="Figure2.pdf", height=20, width=20)
+pdf(file="Figure2.pdf", height=25, width=25)
 #(p7|g)/((a1|a2|a3)/(a4|a5|a6))/(f|h)q
 #((p7/g)|((a1|a2)/(a3|a4)))/(f|h)
 #(p7/g/f)|(((a1|a2)/(a3|a4)/(a5|a6))/h)
-(p7/g/f)|(a7/h)
+(g/f)|(a7/h)
 dev.off()
-jpeg(file="Figure2.jpg", height=2000, width=2000)
-(p7/g/f)|(a7/h)
+jpeg(file="Figure2.jpg", height=2500, width=2500)
+(g/f)|(a7/h)
 dev.off()
 
 
@@ -372,21 +372,18 @@ ekexpression<-rownames(subset(ekexpression, expression > 0))
 write.table(ekexpression, file="ek_all_genes.txt")
 
 
+
 bite<-read.table(file="biteit_enamelknot_genes.txt")
 bite<-bite$V1
+
 ekjax<-read.table(file="JAX_enamelknot_genes.txt")
 ekjax<-ekjax$V1
 pekjax<-read.table(file="JAX_primaryenamelknot_genes.txt")
 pekjax<-pekjax$V1
-jax<-read.table(file="JAX_budstage_genes.txt", sep="\t", header=TRUE)
-jax<-jax$Gene.Symbol
-jaxcap<-read.table(file="JAX_capstage_genes.txt", sep="\t", header=TRUE)
-jaxcap<-jaxcap$Gene.Symbol
-jax<-union(jax, jaxcap)
 allgenes<-read.table(file="background.txt")
 allgenes<-allgenes$x
-allpek<-union(pekjax, bite)
-jax<-union(jax, allpek)
+
+jax<-union(pekjax, bite)
 
 enamel<-AddModuleScore(object=enamel, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
 tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
@@ -423,10 +420,10 @@ j<-VlnPlot(tooth, features = "KnownEK1", log = FALSE, group.by="idents", pt.size
 
 
 pdf(file="Figure3.pdf", height=25, width=20)
-(p6|j)/(p7|h|i)/(a1|a2|f)
+(p6|j)/(p7|a1|a2)/(h|i|f)
 dev.off()
 jpeg(file="Figure3.jpg", height=2500, width=2000)
-(p6|j)/(p7|h|i)/(a1|a2|f)
+(p6|j)/(p7|a1|a2)/(h|i|f)
 dev.off()
 
 
@@ -473,29 +470,21 @@ ekjax<-read.table(file="JAX_enamelknot_genes.txt")
 ekjax<-ekjax$V1
 pekjax<-read.table(file="JAX_primaryenamelknot_genes.txt")
 pekjax<-pekjax$V1
-jax<-read.table(file="JAX_budstage_genes.txt", sep="\t", header=TRUE)
-jax<-jax$Gene.Symbol
-jaxcap<-read.table(file="JAX_capstage_genes.txt", sep="\t", header=TRUE)
-jaxcap<-jaxcap$Gene.Symbol
-jax<-union(jax, jaxcap)
 allgenes<-read.table(file="background.txt")
 allgenes<-allgenes$x
 
-allpek<-union(pekjax, bite)
-jax<-union(jax, allpek)
+jax<-union(pekjax, bite)
 
 write.table(jax, "SupplementalTable5.txt")
-venn<-list(bite, ekmarkers, topekmarkers, ekexpression, ekjax, pekjax, jax, jaxcap, allgenes, allpek)
+venn<-list(bite, ekmarkers, topekmarkers, ekexpression, ekjax, pekjax, jax, allgenes)
 names(venn)[1]<-c("Bite-It Known EK Genes")
 names(venn)[2]<-c("EK Markers")
 names(venn)[3]<-c("Top EK Markers")
 names(venn)[4]<-c("All Identified EK Genes")
 names(venn)[5]<-c("JAX All EK Genes")
-names(venn)[6]<-c("JAX All Primary EK Genes")
-names(venn)[7]<-c("JAX Known Bud and Cap Stage Genes")
-names(venn)[8]<-c("JAX Known Cap Stage Genes")
-names(venn)[9]<-c("All Identified Bud Stage Genes")
-names(venn)[10]<-c("All Known EK Genes")
+names(venn)[6]<-c("All Known EK Genes")
+names(venn)[7]<-c("All Identified Bud Stage Genes")
+names(venn)[8]<-c("All Known EK Genes")
 d5<-ggvenn(venn, columns =c("All Known EK Genes", "Top EK Markers"))
 
 
@@ -556,6 +545,7 @@ plot1<-upsetplot(value_bp1) + theme(aspect.ratio = 1)
 plot2<-upsetplot(value_bp2) + theme(aspect.ratio = 1)
 
 library(ggplotify)
+ekmarkers<-rownames(ekmarkers)
 completely_contained <- euler(c("A" = length(setdiff(jax, ekmarkers)), "B" = length(setdiff(ekmarkers, jax)), "A&B" = (length(jax) - length(setdiff(jax, ekmarkers)))))
 p3<-as.ggplot(plot(completely_contained, labels = c("Known EK Genes", "All EK Marker Genes"), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
 p3<-p3+theme(aspect.ratio=1)
@@ -594,22 +584,6 @@ p|(f/g)|(f2/g2)|(p3/g4)
 dev.off()
 
 write.table(jax, "SupplementalTable5.txt")
-venn<-list(bite, rownames(ekmarkers), topekmarkers, levels(ekexpression), ekjax, pekjax, jax, jaxcap, allgenes, jax)
-names(venn)[1]<-c("Bite-It Known EK Genes")
-names(venn)[2]<-c("All EK Markers")
-names(venn)[3]<-c("Top EK Markers")
-names(venn)[4]<-c("All Identified EK Genes")
-names(venn)[5]<-c("JAX All EK Genes")
-names(venn)[6]<-c("JAX All Primary EK Genes")
-names(venn)[7]<-c("JAX Known Bud and Cap Stage Genes")
-names(venn)[8]<-c("JAX Known Cap Stage Genes")
-names(venn)[9]<-c("All Identified Bud Stage Genes")
-names(venn)[10]<-c("All Known EK Genes")
-
-d7<-ggvenn(venn, columns =c("All Known EK Genes", "Top EK Markers"), set_name_size=6, text_size=4) + theme(text=element_text(size = 4), aspect.ratio=1)
-d6<-ggvenn(venn, columns =c("All Identified EK Genes", "All Known EK Genes"), set_name_size=6, text_size=4) + theme(text=element_text(size = 4), aspect.ratio=1)
-d5<-ggvenn(venn, columns =c("All Known EK Genes", "All EK Markers"), set_name_size=6, text_size=4) + theme(text=element_text(size = 4), aspect.ratio=1)
-ekmarkers<-rownames(ekmarkers)
 allgenes<-rownames(tooth)
 library(permute)
 d<-NULL
