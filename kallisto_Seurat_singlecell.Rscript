@@ -1,0 +1,85 @@
+#use archr environment for this
+library("htmltools")
+library("vembedr")
+library(Matrix)
+library(irlba)
+library(ggplot2) # Tidyverse is pre-installed, yay!
+library(dplyr)
+library(scico)
+set.seed(123)
+library(Seurat)
+library(DropletUtils)
+set.seed(123)
+library(tidyverse)
+library(readr)
+library(ggpointdensity)
+read_count_output <- function(dir, name) {
+  m <- readMM(paste0(dir, "/", name, ".mtx"))
+  m <- Matrix::t(m)
+  m <- as(m, "dgCMatrix")
+  # The matrix read has cells in rows
+  ge <- ".genes.txt"
+  genes <- readLines(file(paste0(dir, "/", name, ge)))
+  barcodes <- readLines(file(paste0(dir, "/", name, ".barcodes.txt")))
+  colnames(m) <- barcodes
+  rownames(m) <- genes
+  return(m)
+}
+pdf(file="all_reps_qc_kallisto.pdf")
+list<-c("1", "4", "7", "9")
+flw<-vector("list", length(list))
+tr2g <- read_tsv("~/cotney/genome/mm10/STAR/mus_musculus/transcripts_to_genes.txt", col_names = c("transcript", "gene", "gene_symbol"))
+
+for (REPNUM in list){
+flw[[REPNUM]]<-paste("molar_", REPNUM, sep="")
+res_mat <- read_count_output(paste("~/cotney/rawdata/GEO/mouse/embryonictoot/scRNAseq/combined/fastqs/e14-5_molar_", REPNUM, "-rna-out/counts_unfiltered", sep=""), name = "cells_x_genes")
+dim(res_mat)
+tot_counts <- Matrix::colSums(res_mat)
+summary(tot_counts)
+bc_rank <- barcodeRanks(res_mat, lower = 10)
+knee_plot <- function(bc_rank) {
+  knee_plt <- tibble(rank = bc_rank[["rank"]],
+                     total = bc_rank[["total"]]) %>% 
+    distinct() %>% 
+    dplyr::filter(total > 0)
+  annot <- tibble(inflection = metadata(bc_rank)[["inflection"]],
+                  rank_cutoff = max(bc_rank$rank[bc_rank$total > metadata(bc_rank)[["inflection"]]]))
+  p <- ggplot(knee_plt, aes(total, rank)) +
+    geom_line() +
+    geom_hline(aes(yintercept = rank_cutoff), data = annot, linetype = 2) +
+    geom_vline(aes(xintercept = inflection), data = annot, linetype = 2) +
+    scale_x_log10() +
+    scale_y_log10() +
+    annotation_logticks() +
+    labs(y = "Rank", x = "Total UMIs")
+  return(p)
+}
+print(knee_plot(bc_rank))
+res_mat <- res_mat[, tot_counts > metadata(bc_rank)$inflection]
+res_mat <- res_mat[Matrix::rowSums(res_mat) > 0,]
+dim(res_mat)
+rownames(res_mat) <- tr2g$gene_symbol[match(rownames(res_mat), tr2g$gene)]
+seu <- CreateSeuratObject(res_mat, min.cells = 3, min.features = 200, project=paste("molar_", REPNUM, sep=""))
+seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^mt-")
+# Visualize QC metrics as a violin plot
+print(VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, ))
+print(ggplot(seu@meta.data, aes(nCount_RNA, nFeature_RNA)) +
+  geom_hex(bins = 100) +
+  scale_fill_scico(palette = "devon", direction = -1, end = 0.9) +
+  scale_x_log10() + 
+  scale_y_log10() + annotation_logticks() +
+  labs(x = "Total UMI counts", y = "Number of genes detected") +
+  theme(panel.grid.minor = element_blank()))
+print(ggplot(seu@meta.data, aes(nCount_RNA, percent.mt)) +
+  geom_pointdensity() +
+  scale_color_scico(palette = "devon", direction = -1, end = 0.9) +
+  labs(x = "Total UMI counts", y = "Percentage mitochondrial"))
+saveRDS(seu, file=paste(flw[[REPNUM]], "_for_integration.rds", sep=""))
+assign(flw[[REPNUM]], seu)
+}
+
+dev.off()
+
+
+
+
