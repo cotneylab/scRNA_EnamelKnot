@@ -10,6 +10,7 @@ library(wordcloud)
 library(RColorBrewer)
 library(eulerr)
 library(wordcloud2)
+library(scWGCNA)
 library(tm)
 library("clusterProfiler")
 library("gplots")
@@ -172,6 +173,8 @@ b|g
 dev.off()
 
 
+tooth1<-tooth
+
 tooth<-RenameIdents(tooth, `0`="Mesenchyme", `1`="Mesenchyme", `2`='Mesenchyme', `3`='Mesenchyme', `4`='Epithelium', `5`='Mesenchyme', `6`='Epithelium', `7`='Mesenchyme', `8`='Epithelium', `9`='Red Blood Cells', `10`='Bone Progenitor Cells', `11`='Endothelium', `12`='Epithelium', `13`='Other Blood Cells', `14`='Epithelium', `15`='Perivascular Cells')
 
 bonecells<-WhichCells(object=tooth, ident="Bone Progenitor Cells")
@@ -200,7 +203,7 @@ mod<-intersect(rownames(tooth), get(node))
 print(node)
 print(length(mod))
 modulename<-gsub(".txt", "", gsub("Module|markergenes", "", node))
-#tooth<-AddModuleScore(object=tooth, features=list(mod), bins=1, control=1000, name = modulename, seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(mod), bins=1, control=1000, name = modulename, seed = 1, search = TRUE)
 write.table(mod, file=paste(node, "Module_MarkerGenes.txt", sep=''), sep='\t')
 mod<-as.data.frame(mod)
 mod$Cluster<-paste(modulename)
@@ -223,16 +226,18 @@ standardmarkers<-c('Msx1', "Pitx2", 'Hba-a1', "Cdh5", "Fcer1g", "Sox10")
 p7<-DimPlot(tooth, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
 a7<-FeaturePlot(tooth, features=standardmarkers, ncol=2, coord.fixed=TRUE)
 f <- DimPlot(tooth, reduction="umap", group.by="idents", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) & theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1, legend.position="none")
-g <- DimPlot(tooth, group.by="GO", pt.size=1.5,, cols=c("#636B59", "#CDE2B8", "#90A5A9", "#00A36C", "#00FFFF", "#228B22", "#7CFC00", "#0000FF", "#088F8F", "#0096FF", "#B4C424", "#C4B454", "#DFFF00", "#96DED1")) + theme(legend.text=element_text(size=15), legend.position="right") + theme(aspect.ratio = 1)
+g <- DimPlot(tooth1, group.by="GO", pt.size=1.5, cols=c("#636B59", "#CDE2B8", "#90A5A9", "#00A36C", "#00FFFF", "#228B22", "#7CFC00", "#0000FF", "#088F8F", "#0096FF", "#B4C424", "#C4B454", "#DFFF00", "#96DED1")) + theme(legend.text=element_text(size=15), legend.position="right") + theme(aspect.ratio = 1)
 h <- DotPlot(tooth, features = c("Mesenchyme1", "Epithelium1", "Endothelium1", "Immune1", "Perivascular1"), group.by="idents", cols=c("red", "blue"), dot.scale=10) + theme(aspect.ratio = 1)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=20), axis.text.y=element_text(size=20)) + labs(y="Cluster Classification", x="Gene Module from Adult Incisor") 
 
-pdf(file="Figure2.pdf", height=35, width=35)
+pdf(file="Figure2.pdf", height=30, width=30)
 #q<-(g/f)|a7|h
 q<-(g|a7)/(h|f)
 q
 dev.off()
-ggsave("Figure2.eps", q, height=35, width=35)
-jpeg(file="Figure2.jpg", height=3500, width=3500)
+ggsave("Figure2.eps", q, height=30, width=30)
+ggsave("Figure2.svg", q, height=30, width=30)
+
+jpeg(file="Figure2.jpg", height=3000, width=3000)
 q
 dev.off()
 
@@ -275,8 +280,8 @@ pekjax<-pekjax$V1
 allgenes<-rownames(tooth)
 jax<-union(pekjax, bite)
 
-enamel<-AddModuleScore(object=enamel, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
-tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
+enamel<-AddModuleScore(object=enamel, features=list(jax), pool = NULL, ctrl = 1000, name = "CEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "CEK", seed = 1, search = TRUE)
 
 enamel$idents<-Idents(enamel)
 standardmarkers<-c("Shh", 'Cdkn1a', "Lef1", 'Wnt6', 'Fgf3')
@@ -314,7 +319,7 @@ dev.off()
 pdf(file="Ectoderm_modulescores_markergenes.pdf", height=7.5, width=7.5)
 DimPlot(enamel, reduction = "umap", group.by="seurat_clusters") + theme(aspect.ratio = 1)
 DimPlot(enamel, reduction='umap', group.by='Phase') + theme(aspect.ratio=1) + ggtitle('Cell Phase')
-VlnPlot(enamel, group.by="seurat_clusters", features="KnownEK1")
+VlnPlot(enamel, group.by="seurat_clusters", features="CEK1")
 VlnPlot(enamel, group.by="seurat_clusters", features="StandardDentalEpi1")
 DotPlot(enamel, group.by='seurat_clusters', features=standardmarkers, cols=c('red', 'blue'))+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 DotPlot(enamel, group.by='seurat_clusters', features=dentalepimarkers, cols=c('red', 'blue'))+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
@@ -345,7 +350,7 @@ my_cols <- c('6'='#c7be02','2'='#a8a32d','3'='#ABA300','0'='#524f08','4'='#adab7
 my_cols2 <- my_cols[order(as.integer(names(my_cols)))]
 scales::show_col(my_cols2)
 
-p6<-FeaturePlot(tooth, features = "KnownEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+p6<-FeaturePlot(tooth, features = "CEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
 
 p7<-DimPlot(enamel, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=14, cols=my_cols2) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
 
@@ -360,11 +365,11 @@ f <- DimPlot(enamel, reduction="umap", group.by="idents", pt.size=1.5, label.siz
 
 #g <- DotPlot(enamel, features = standardmarkers, group.by="seurat_clusters") + theme(aspect.ratio = 1) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
 
-h<-FeaturePlot(enamel, features = "KnownEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+h<-FeaturePlot(enamel, features = "CEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
 
-i<-VlnPlot(enamel, features = "KnownEK1", slot = "counts", log = FALSE, group.by="seurat_clusters", pt.size = 0.05, cols=my_cols2) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("7", "2"), c('7', '1'), c('7', '3'), c('7', '4'), c('7', '5'), c('7', '6'), c('7', '0')), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6)
+i<-VlnPlot(enamel, features = "CEK1", slot = "counts", log = FALSE, group.by="seurat_clusters", pt.size = 0.05, cols=my_cols2) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("7", "2"), c('7', '1'), c('7', '3'), c('7', '4'), c('7', '5'), c('7', '6'), c('7', '0')), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6)
 
-j<-VlnPlot(tooth, features = "KnownEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ geom_signif(comparisons = list(c("Mesenchyme", "Epithelium"), c("Epithelium", "Endothelium"), c("Epithelium", "Other Blood Cells"), c("Epithelium", "Red Blood Cells"), c("Epithelium", "Perivascular Cells")), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6) 
+j<-VlnPlot(tooth, features = "CEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ geom_signif(comparisons = list(c("Mesenchyme", "Epithelium"), c("Epithelium", "Endothelium"), c("Epithelium", "Other Blood Cells"), c("Epithelium", "Red Blood Cells"), c("Epithelium", "Perivascular Cells")), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6) 
 
 
 pdf(file="Figure3.pdf", height=25, width=20)
@@ -415,7 +420,7 @@ ekmarkers<-rownames(EKmarkers[order(EKmarkers$avg_logFC),])
 bite<-read.table(file="biteit_enamelknot_genes.txt")
 bite<-bite$V1
 
-topekmarkers<-rownames(EKmarkers[EKmarkers$avg_logFC > 1,])
+TPEKmarkers<-rownames(EKmarkers[EKmarkers$avg_logFC > 1,])
 
 ekexpression<-read.table(file="ek_all_genes.txt")
 ekexpression<-ekexpression$x
@@ -427,7 +432,7 @@ allgenes<-rownames(tooth)
 jax<-union(pekjax, bite)
 
 write.table(jax, "SupplementalTable5.txt")
-venn<-list(bite, ekmarkers, topekmarkers, ekexpression, ekjax, pekjax, jax, allgenes)
+venn<-list(bite, ekmarkers, TPEKmarkers, ekexpression, ekjax, pekjax, jax, allgenes)
 names(venn)[1]<-c("Bite-It Known EK Genes")
 names(venn)[2]<-c("EK Markers")
 names(venn)[3]<-c("Top EK Markers")
@@ -439,20 +444,20 @@ names(venn)[8]<-c("All Known EK Genes")
 d5<-ggvenn(venn, columns =c("All Known EK Genes", "Top EK Markers"))
 
 
-write.table(topekmarkers, file="SupplementalTable8.txt")
+write.table(TPEKmarkers, file="SupplementalTable8.txt")
 novelekmarkers<-setdiff(ekmarkers, jax)
 
-tooth<-AddModuleScore(object=tooth, features=list(topekmarkers), pool = NULL, ctrl = 1000, name = "TopEK", seed = 1, search = TRUE)
-tooth<-AddModuleScore(object=tooth, features=list(ekmarkers), pool = NULL, ctrl = 1000, name = "AllEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(TPEKmarkers), pool = NULL, ctrl = 1000, name = "TPEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(ekmarkers), pool = NULL, ctrl = 1000, name = "PEK", seed = 1, search = TRUE)
 tooth<-AddModuleScore(object=tooth, features=list(novelekmarkers), pool = NULL, ctrl = 1000, name = "NovelEK", seed = 1, search = TRUE)
-tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "KnownEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "CEK", seed = 1, search = TRUE)
 
 for (featurename in jax){
 l<-FeaturePlot(tooth, features = featurename) + theme(aspect.ratio = 1)
 g2<-VlnPlot(tooth, features = featurename, log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) + geom_boxplot(width=0.1,fill="white") + labs(title = featurename, x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ ylim(-0.1,1.5)
 #print(l|g2)
 }
-pdf(file="Supplemental_AllCombined_UMAPAllKnownEKGenes.pdf", height=20, width=20)
+pdf(file="Supplemental_AllCombined_UMAPAllCEKGenes.pdf", height=20, width=20)
 DotPlot(tooth, features=jax, cols=c('green', 'purple')) + theme(aspect.ratio = 1) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=15))
 dev.off()
 saveRDS(tooth, file = "FINAL_tooth_with_rep_data_renamed_clusters_EK_module_score.rds")
@@ -463,43 +468,49 @@ ekmarkers<-read.table(file="tooth_clustermarkers_renamed_clusters_allEnamelKnot.
 
 EnamelKnotTop<-subset(ekmarkers, ekmarkers$avg_logFC >= 1.0)
 EnamelKnotTop<-EnamelKnotTop[order(EnamelKnotTop$avg_logFC),]
-topekmarkers<-rownames(EnamelKnotTop)
-topEK<-tail(topekmarkers, 6)
+TPEKmarkers<-rownames(EnamelKnotTop)
+TPEK<-tail(TPEKmarkers, 6)
 background<-bitr(rownames(tooth), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
-novelekmarkers<-setdiff(rownames(ekmarkers), jax)
-value <- bitr(rownames(ekmarkers), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
-value_bp <- enrichGO(gene = value$ENTREZID,
-                      universe = background$ENTREZID,
+novelekmarkers<-setdiff(TPEKmarkers, jax)
+value_bp <- enrichGO(gene = rownames(ekmarkers),
+                      universe = rownames(tooth),
                       OrgDb = org.Mm.eg.db, 
-                      keyType = 'ENTREZID',
-                      readable = T,
+                      keyType = 'SYMBOL',
+                      readable = F,
                       ont = "BP",
                       qvalueCutoff = 0.05,
                       pAdjustMethod = "bonferroni")
 write.table(ekmarkers, file="SupplementalTable6.txt")
 write.table(as.data.frame(value_bp), file="SupplementalTable7.txt")
-value1 <- bitr(topekmarkers, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
-value_bp1 <- enrichGO(gene = value1$ENTREZID,
-                      universe = background$ENTREZID,
+cnet<-cnetplot(value_bp, foldChange=ekmarkers$avg_logFC, categorySize='pvalue', circular=TRUE, colorEdge=TRUE, node_label="gene")
+heatplot(value_bp, foldChange=ekmarkers$avg_logFC, showCategory=10)
+value_bp1 <- enrichGO(gene = TPEKmarkers,
+                      universe = rownames(tooth),
                       OrgDb = org.Mm.eg.db, 
-                      keyType = 'ENTREZID',
-                      readable = T,
+                      keyType = 'SYMBOL',
+                      readable = F,
                       ont = "BP",
                       qvalueCutoff = 0.05,
                       pAdjustMethod = "bonferroni")
-value2 <- bitr(novelekmarkers, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
-value_bp2 <- enrichGO(gene = value2$ENTREZID,
-                      universe = background$ENTREZID,
+netplot<-cnetplot(value_bp1, foldChange=ekmarkers$avg_logFC, categorySize='qvalue', circular=TRUE, colorEdge=TRUE, showCategory=10, node_label='all') + theme(aspect.ratio=1, legend.position='none') 
+heatplot(value_bp1, foldChange=ekmarkers$avg_logFC, showCategory=10)
+value_bp2 <- enrichGO(gene = novelekmarkers,
+                      universe =rownames(tooth),
                       OrgDb = org.Mm.eg.db, 
-                      keyType = 'ENTREZID',
-                      readable = T,
+                      keyType = 'SYMBOL',
+                      readable = F,
                       ont = "BP",
                       qvalueCutoff = 0.05,
                       pAdjustMethod = "bonferroni")
+bp_emap<-pairwise_termsim(value_bp2, semData=NULL, showCategory=200)
+netplot2<-cnetplot(value_bp2, foldChange=ekmarkers$avg_logFC, categorySize='qvalue', circular=TRUE, colorEdge=TRUE, showCategory=10, node_label='all') + theme(aspect.ratio=1, legend.position='none') 
+heatplot(value_bp2, foldChange=ekmarkers$avg_logFC, showCategory=10)
+
 plott<-as.ggplot(upsetplot(value_bp)) + theme(aspect.ratio = 1)
 plot1<-upsetplot(value_bp1) + theme(aspect.ratio = 1)
 plot2<-upsetplot(value_bp2) + theme(aspect.ratio = 1)
-
+plot3<-emapplot(bp_emap, layout="nicely", color="qvalue")+ggtitle('PEKGenes Ontology Emap')
+plot4<-goplot(value_bp1, color="qvalue", layout="kk", font.size="10") + ggtitle('PEKGenes Ontology network')
 library(ggplotify)
 completely_contained <- euler(c("A" = length(setdiff(jax, rownames(ekmarkers))), "B" = length(setdiff(rownames(ekmarkers), jax)), "A&B" = (length(jax) - length(setdiff(jax, rownames(ekmarkers))))))
 p3<-as.ggplot(plot(completely_contained, labels = c("Known EK Genes", "All EK Marker Genes"), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
@@ -508,32 +519,33 @@ p3<-p3+theme(aspect.ratio=1)
 
 p<-DimPlot(tooth, reduction = "umap", group.by="idents", pt.size=1.5, label=TRUE, label.size=10, repel=TRUE, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + theme(aspect.ratio = 1, legend.position="none", text=element_text(size=20))
 
-f<-FeaturePlot(tooth, features = "KnownEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score")  + theme(aspect.ratio = 1, text = element_text(size = 20))
+f<-FeaturePlot(tooth, features = "CEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score")  + theme(aspect.ratio = 1, text = element_text(size = 20))
 
-g<-VlnPlot(tooth, features = "KnownEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + ylim(-0.1,1.7)
+g<-VlnPlot(tooth, features = "CEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + ylim(-0.1,1.7)
 
 h<-FeaturePlot(tooth, features = "Bmp4", cols=c('white', "blue"), pt.size=1.5) + theme(aspect.ratio = 1, text = element_text(size = 20)) 
 
-f2<-FeaturePlot(tooth, features = "AllEK1", cols=c('white', "purple"), pt.size=1.5) + labs(title = "EK Gene Signature Module Score") + theme(aspect.ratio = 1, text = element_text(size = 20)) 
+f2<-FeaturePlot(tooth, features = "PEK1", cols=c('white', "purple"), pt.size=1.5) + labs(title = "EK Gene Signature Module Score") + theme(aspect.ratio = 1, text = element_text(size = 20)) 
 
-g2<-VlnPlot(tooth, features = "AllEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "EK Marker Gene Module Score", x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ ylim(-0.1,1.7)
+g2<-VlnPlot(tooth, features = "PEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + geom_boxplot(width=0.1,fill="white") + labs(title = "EK Marker Gene Module Score", x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ ylim(-0.1,1.7)
 
-data <- FetchData(tooth, vars = c('KnownEK1','AllEK1', 'idents'), slot = "counts") 
+data <- FetchData(tooth, vars = c('CEK1','PEK1', 'idents'), slot = "counts") 
 #data<-data[data$idents == "Enamel Knot",]
 long_data <- melt(data)
-g3<-ggplot(long_data, aes(x = idents, y = value, fill=variable)) + geom_violin() + labs(title = "Module Scores of Known vs Marker EK Genes", x="Gene Module", y="Module Score") + scale_fill_manual(values=c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + theme(aspect.ratio = 1, text = element_text(size = 20)) + geom_signif(comparisons = list(c("AllEK1", "KnownEK1")), test = "wilcox.test", map_signif_level = TRUE, textsize = 6) 
+g3<-ggplot(long_data, aes(x = idents, y = value, fill=variable)) + geom_violin() + labs(title = "Module Scores of Known vs Marker EK Genes", x="Gene Module", y="Module Score") + scale_fill_manual(values=c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4')) + theme(aspect.ratio = 1, text = element_text(size = 20)) + geom_signif(comparisons = list(c("PEK1", "CEK1")), test = "wilcox.test", map_signif_level = TRUE, textsize = 6) 
 
-data <- FetchData(tooth, vars = c('KnownEK1','AllEK1', 'idents'), slot = "counts") 
+data <- FetchData(tooth, vars = c('CEK1','PEK1', 'idents'), slot = "counts") 
 data<-data[data$idents == "Enamel Knot",]
 long_data <- melt(data)
-g4<-ggplot(long_data, aes(x = variable, y = value, fill=variable)) + geom_violin() + labs(title = "Module Scores in the Enamel Knot", x="Gene Module", y="Module Score") + stat_summary(fun.data=mean_sdl, geom="pointrange", color="black") + scale_fill_manual(values=c("red", "purple")) + theme(aspect.ratio = 1, legend.position = "none", text=element_text(size=20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("AllEK1", "KnownEK1")), test = "wilcox.test", map_signif_level = TRUE, textsize = 8)
+g4<-ggplot(long_data, aes(x = variable, y = value, fill=variable)) + geom_violin() + labs(title = "Module Scores in the Enamel Knot", x="Gene Module", y="Module Score") + stat_summary(fun.data=mean_sdl, geom="pointrange", color="black") + scale_fill_manual(values=c("red", "purple")) + theme(aspect.ratio = 1, legend.position = "none", text=element_text(size=20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("PEK1", "CEK1")), test = "wilcox.test", map_signif_level = TRUE, textsize = 8)
 
 
-#plot4<-DotPlot(tooth, features = head(topekmarkers, 10)) + labs(title = "Top EK Marker Gene Expression") + theme(aspect.ratio = 1) 
+#plot4<-DotPlot(tooth, features = head(TPEKmarkers, 10)) + labs(title = "Top EK Marker Gene Expression") + theme(aspect.ratio = 1) 
 
-pdf(file="Figure4.pdf", height=15, width=35)
+pdf(file="Figure4.pdf", height=25, width=35)
 #p|((f|g)/(f2|g2)/(p3|g4))
 x<-p|(f/g)|(f2/g2)|(p3/g4)
+x<-(p|p3|netplot)/(g|g2|g4)
 x
 dev.off()
 ggsave("Figure4.eps", x, height=15, width=35)
@@ -569,7 +581,7 @@ length(intersect(ekmarkers, jax))
 ###p value is <0.0001, since the number is 38 and that NEVER appears in random sampling of 10,000 times
 pdf(file="SupplementalFigure4.pdf", height=8, width=24)
 p<-hist(d, xlim=c(0,40), main="Number of EK Genes From Random Sampling of 317 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(ekmarkers, jax)))
-p1<-hist(d2, xlim=c(0,10), main="Number of EK Genes From Random Sampling of 60 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(topekmarkers, jax)))
+p1<-hist(d2, xlim=c(0,10), main="Number of EK Genes From Random Sampling of 60 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(TPEKmarkers, jax)))
 p2<-hist(d3, xlim=c(0,100), main="Number of EK Genes From Random Sampling of 21160 Genes Expressed in E14 Molar", xlab="Number of Overlapping Genes with EK", ylab="Frequency") + abline(v=length(intersect(rownames(avg), jax))) 
 p 
 p1
@@ -672,7 +684,7 @@ dev.off()
 library(ggplotify)
 EKmarkers<-read.table("tooth_clustermarkers_renamed_clusters_allEnamelKnot.txt")
 ekmarkers<-rownames(EKmarkers[order(EKmarkers$avg_logFC),])
-topekmarkers<-rownames(EKmarkers[EKmarkers$avg_logFC > 1,])
+TPEKmarkers<-rownames(EKmarkers[EKmarkers$avg_logFC > 1,])
 library(permute)
 background <- bitr(rownames(tooth), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
 data2<-NULL
@@ -698,7 +710,7 @@ nodes2<-paste(gsub('Module_Molar_WGCNA|.txt', '', nodes), 'module', sep='')
 for (NODENAME2 in nodes2){
 NODENAME<-get(NODENAME2)
 completely_contained1 <- euler(c("A" = length(setdiff(NODENAME, ekmarkers)), "B" = length(setdiff(ekmarkers, NODENAME)), "A&B" = (length(NODENAME) - length(setdiff(NODENAME, ekmarkers)))))
-completely_contained2 <- euler(c("A" = length(setdiff(NODENAME, topekmarkers)), "B" = length(setdiff(topekmarkers, NODENAME)), "A&B" = (length(NODENAME) - length(setdiff(NODENAME, topekmarkers)))))
+completely_contained2 <- euler(c("A" = length(setdiff(NODENAME, TPEKmarkers)), "B" = length(setdiff(TPEKmarkers, NODENAME)), "A&B" = (length(NODENAME) - length(setdiff(NODENAME, TPEKmarkers)))))
 p3<-as.ggplot(plot(completely_contained1, labels = c(paste(NODENAME2, "Genes", sep=' '), "All EK Marker Genes"), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
 p3<-p3+theme(aspect.ratio=1)
 p4<-as.ggplot(plot(completely_contained2, labels = c(paste(NODENAME2, "Genes", sep=' '), "Top EK Marker Genes"), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
@@ -714,10 +726,10 @@ t<-table(d)
 d2<-NULL
 for (i in 1:10000){
 markers<-sample(allgenes,len)
-d2<-rbind(d2, length(intersect(markers, topekmarkers)))
+d2<-rbind(d2, length(intersect(markers, TPEKmarkers)))
 }
 t2<-table(d2)
-topabline<-length(intersect(topekmarkers, NODENAME))+5
+topabline<-length(intersect(TPEKmarkers, NODENAME))+5
 
 value_bp <- enrichGO(gene = NODENAME, universe = rownames(tooth), OrgDb = org.Mm.eg.db,  keyType = 'SYMBOL', readable = F, ont = "BP", qvalueCutoff = 0.05, pAdjustMethod = "bonferroni")
 plott<-as.ggplot(dotplot(value_bp, showCategory=10)) + theme(aspect.ratio = 1)
@@ -739,7 +751,7 @@ abline(v=length(intersect(ekmarkers, NODENAME)))
 labs(main=paste("Number of EK Marker Genes From Random Sampling of", len, "Random Genes", sep=" "), xlab="Number of Overlapping Genes with EK", ylab="Frequency")
 print(p4)
 plot(t2, xlim=c(1,topabline)) 
-abline(v=length(intersect(topekmarkers, NODENAME)))
+abline(v=length(intersect(TPEKmarkers, NODENAME)))
 labs(main=paste("Number of Top EK Marker Genes From Random Sampling of", len, "Random Genes", sep=" "), xlab="Number of Overlapping Genes with EK", ylab="Frequency")
 dev.off()
 }
@@ -807,3 +819,291 @@ abline(v=length(intersect(topmesmarkers, NODENAME)))
 labs(main=paste("Number of Top EK Marker Genes From Random Sampling of", len, "Random Genes", sep=" "), xlab="Number of Overlapping Genes with EK", ylab="Frequency")
 dev.off()
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(scWGCNA)
+library(Seurat)
+library(Matrix)
+library(tidyverse)
+library(rliger)
+library(WGCNA)
+tooth<-readRDS(file="FINAL_tooth_with_rep_data_renamed_clusters_EK_module_score.rds")
+# construct metacells by ODC group, condition
+tooth$Idents<-Idents(tooth)
+seurat_odc<-tooth
+seurat_odc$metacell_group <- as.character(seurat_odc$Idents)
+
+genes.keep <- VariableFeatures(seurat_odc)
+
+# loop through each group and construct metacells
+seurat_list <- list()
+for(group in unique(seurat_odc$metacell_group)){
+  print(group)
+  cur_seurat <- subset(seurat_odc, metacell_group == group)
+  cur_seurat <- cur_seurat[genes.keep,]
+  cur_metacell_seurat <- scWGCNA::construct_metacells(
+    cur_seurat, name=group,
+    k=100, reduction='umap',
+    assay='RNA', slot='data'
+  )
+#  cur_metacell_seurat$Condition <- as.character(unique(cur_seurat$Condition))
+  cur_metacell_seurat$Idents <- as.character(unique(cur_seurat$Idents))
+  seurat_list[[group]] <- cur_metacell_seurat
+}
+
+# merge all of the metacells objects
+metacell_seurat <- merge(seurat_list[[1]], seurat_list[2:length(seurat_list)])
+saveRDS(metacell_seurat, file='metacell_tooth_seurat.rds')
+
+
+
+# how many groups are there
+nclusters <- length(unique(metacell_seurat$Idents))
+
+# which genes are we using ?
+genes.use <- rownames(metacell_seurat)
+
+# cell meta-data table
+targets <- metacell_seurat@meta.data
+
+# vector of cell conditions
+group <- as.factor(metacell_seurat$Idents)
+
+# format the expression matrix for WGCNA
+datExpr <- as.data.frame(GetAssayData(metacell_seurat, assay='RNA', slot='data')[genes.use,])
+datExpr <- as.data.frame(t(datExpr))
+
+# only keep good genes:
+datExpr <- datExpr[,goodGenes(datExpr)]
+
+
+
+# Choose a set of soft-thresholding powers
+powers = c(seq(1,10,by=1), seq(12,30, by=2));
+
+# Call the network topology analysis function for each set in turn
+powerTable = list(
+  data = pickSoftThreshold(
+    datExpr,
+    powerVector=powers,
+    verbose = 100,
+    networkType="signed",
+    corFnc="bicor"
+  )[[2]]
+);
+
+# Plot the results:
+pdf("1_Power.pdf", height=10, width=18)
+
+colors = c("blue", "red","black")
+# Will plot these columns of the returned scale free analysis tables
+plotCols = c(2,5,6,7)
+colNames = c("Scale Free Topology Model Fit", "Mean connectivity", "mean connectivity",
+"Max connectivity");
+
+# Get the minima and maxima of the plotted points
+ylim = matrix(NA, nrow = 2, ncol = 4);
+for (col in 1:length(plotCols)){
+  ylim[1, col] = min(ylim[1, col], powerTable$data[, plotCols[col]], na.rm = TRUE);
+  ylim[2, col] = max(ylim[2, col], powerTable$data[, plotCols[col]], na.rm = TRUE);
+}
+
+# Plot the quantities in the chosen columns vs. the soft thresholding power
+par(mfcol = c(2,2));
+par(mar = c(4.2, 4.2 , 2.2, 0.5))
+cex1 = 0.7;
+
+for (col in 1:length(plotCols)){
+  plot(powerTable$data[,1], -sign(powerTable$data[,3])*powerTable$data[,2],
+  xlab="Soft Threshold (power)",ylab=colNames[col],type="n", ylim = ylim[, col],
+  main = colNames[col]);
+  addGrid();
+
+  if (col==1){
+    text(powerTable$data[,1], -sign(powerTable$data[,3])*powerTable$data[,2],
+    labels=powers,cex=cex1,col=colors[1]);
+  } else
+  text(powerTable$data[,1], powerTable$data[,plotCols[col]],
+  labels=powers,cex=cex1,col=colors[1]);
+  if (col==1){
+    legend("bottomright", legend = 'Metacells', col = colors, pch = 20) ;
+  } else
+  legend("topright", legend = 'Metacells', col = colors, pch = 20) ;
+}
+dev.off()
+
+
+softPower=9
+
+
+nSets = 1
+setLabels = 'tooth'
+shortLabels = setLabels
+
+multiExpr <- list()
+multiExpr[['tooth']] <- list(data=datExpr)
+
+checkSets(multiExpr) # check data size
+
+# construct network
+net=blockwiseConsensusModules(multiExpr, blocks = NULL,
+                                         maxBlockSize = 30000, ## This should be set to a smaller size if the user has limited RAM
+                                         randomSeed = 12345,
+                                         corType = "pearson",
+                                         power = softPower,
+                                         consensusQuantile = 0.3,
+                                         networkType = "signed",
+                                         TOMType = "unsigned",
+                                         TOMDenom = "min",
+                                         scaleTOMs = TRUE, scaleQuantile = 0.8,
+                                         sampleForScaling = TRUE, sampleForScalingFactor = 1000,
+                                         useDiskCache = TRUE, chunkSize = NULL,
+                                         deepSplit = 4,
+                                         pamStage=FALSE,
+                                         detectCutHeight = 0.995, minModuleSize = 50,
+                                         mergeCutHeight = 0.2,
+                                         saveConsensusTOMs = TRUE,
+                                         consensusTOMFilePattern = "ConsensusTOM-block.%b.rda")
+
+
+consMEs = net$multiMEs;
+moduleLabels = net$colors;
+
+# Convert the numeric labels to color labels
+moduleColors = as.character(moduleLabels)
+consTree = net$dendrograms[[1]];
+
+# module eigengenes
+MEs=moduleEigengenes(multiExpr[[1]]$data, colors = moduleColors, nPC=1)$eigengenes
+MEs=orderMEs(MEs)
+meInfo<-data.frame(rownames(datExpr), MEs)
+colnames(meInfo)[1]= "SampleID"
+
+# intramodular connectivity
+KMEs<-signedKME(datExpr, MEs,outputColumnName = "kME",corFnc = "bicor")
+
+# compile into a module metadata table
+geneInfo=as.data.frame(cbind(colnames(datExpr),moduleColors, KMEs))
+
+# how many modules did we get?
+nmodules <- length(unique(moduleColors))
+
+# merged gene symbol column
+colnames(geneInfo)[1]= "GeneSymbol"
+colnames(geneInfo)[2]= "Initially.Assigned.Module.Color"
+
+# save info
+write.csv(geneInfo,file=paste0('geneInfoSigned.csv'))
+
+PCvalues=MEs
+
+
+
+
+pdf("SignedDendro.pdf",height=5, width=8)
+plotDendroAndColors(consTree, moduleColors, "Module colors", dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05,
+main = paste0("ODC lineage gene dendrogram and module colors"))
+dev.off()
+
+
+
+
+
+plot_df <- cbind(select(targets, c(Idents)), PCvalues)
+plot_df <- reshape2::melt(plot_df, id.vars = c('Idents'))
+plot_df$Idents <- factor(plot_df$Idents, levels=as.character(unique(tooth$Idents)))
+
+colors <- sub('ME', '', as.character(levels(plot_df$variable)))
+p <- ggplot(plot_df, aes(x=variable, y=value, fill=Idents)) +
+  geom_boxplot(notch=FALSE) +
+  RotatedAxis() + ylab('Module Eigengene') + xlab('') +
+  theme(
+    axis.text.x=element_blank(),
+    axis.ticks.x=element_blank(),
+  )
+
+# plot width and height:
+w=2*nmodules; h=2*nclusters;
+
+pdf('ME_trajectory_Plot_celtype_condition.pdf',width=w,height=h,useDingbats=F)
+p + facet_wrap(Idents~variable, scales='free', ncol=nmodules)
+dev.off()
+
+
+
+
+
+
+library(igraph);
+library(RColorBrewer);
+
+load("ConsensusTOM-block.1.rda")
+
+TOM.matrix = as.matrix(consTomDS);
+uniquemodcolors = unique(geneInfo$Initially.Assigned.Module.Color);
+uniquemodcolors=uniquemodcolors[uniquemodcolors!='grey']
+
+
+pdf(paste0('ModuleNetworks_25.pdf'),height=9,width=10);
+
+for (mod in uniquemodcolors)  {
+  numgenesingraph = 25;
+  numconnections2keep = 500;
+  cat('module:',mod,'\n');
+  geneInfo=geneInfo[geneInfo$GeneSymbol!="NA",]
+  colind = which(colnames(geneInfo)==paste('kME',mod,sep=''));
+  rowind = which(geneInfo$Initially.Assigned.Module.Color==mod);
+  cat(' ',length(rowind),'probes in module\n');
+  submatrix = geneInfo[rowind,];
+  orderind = order(submatrix[,colind],decreasing=TRUE);
+  if (length(rowind) < numgenesingraph) {
+    numgenesingraph = length(rowind);
+    numconnections2keep = numgenesingraph * (numgenesingraph - 1);
+  }
+  cat('Making network graphs, using top',numgenesingraph,'probes and',numconnections2keep,'connections of TOM\n');
+  submatrix = submatrix[orderind[1:numgenesingraph],];
+  matchind = match(submatrix$GeneSymbol,colnames(datExpr));
+  reducedTOM = TOM.matrix[matchind,matchind];
+
+  orderind = order(reducedTOM,decreasing=TRUE);
+  connections2keep = orderind[1:numconnections2keep];
+  reducedTOM = matrix(0,nrow(reducedTOM),ncol(reducedTOM));
+  reducedTOM[connections2keep] = 1;
+
+  gA <- graph.adjacency(as.matrix(reducedTOM[1:10,1:10]),mode="undirected",weighted=TRUE,diag=FALSE)
+  gB <- graph.adjacency(as.matrix(reducedTOM[11:25,11:25]),mode="undirected",weighted=TRUE,diag=FALSE)
+  layoutCircle <- rbind(layout.circle(gA)/2,layout.circle(gB))
+
+  g1 <- graph.adjacency(as.matrix(reducedTOM),mode="undirected",weighted=TRUE,diag=FALSE)
+
+plot(g1,
+  edge.color=adjustcolor(mod, alpha.f=0.25),
+  edge.alpha=0.25,
+  vertex.color=adjustcolor(mod, alpha.f=0.75),
+  vertex.label=as.character(submatrix$GeneSymbol),
+  vertex.label.cex=2.2,
+  vertex.label.dist=1.1,
+  vertex.label.degree=-pi/4,
+  vertex.label.color="black",
+  #vertex.frame.color='black',
+  layout= jitter(layoutCircle),
+  vertex.size=6,
+  main=paste(mod,"module")
+)
+}
+dev.off();
+
+
+
