@@ -1,0 +1,61 @@
+
+#############make motif figures in R
+library(ggplot2)
+library(ggrepel)
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+
+motif2<-read.table(file="~/cotney/analysis/bulkRNA/tooth/WGCNA/conserved_tooth_motifs/knownResults.txt", row.names=NULL, header=FALSE, sep='\t', skip = 1)
+colnames(motif2)<-c('TF', 'Motif', 'PValue', 'LogPValue', 'AdjustedPValue', 'Hits', 'PctHits', 'BgdHits', 'PctBgd')
+motif2$TF<-gsub('\\-.*', '', gsub('AP-2alpha', 'TFAP2A', gsub('\\(.*|\\:.*|\\..*', '', motif2$TF)))
+motif2<-motif2[which(motif2$AdjustedPValue <= 0.05),]
+motifs<-convertHumanGeneList(motif2$TF)
+motif<-intersect(motifs, rownames(tooth))
+library(stringr)
+motif3<-str_to_title(tolower(motif2[grep(paste(motif, collapse="|"), motif2$TF, ignore.case=TRUE),1]))
+motif3<-motif3[which(motif3 %in% motif)]
+
+motif<-read.table(file="~/cotney/analysis/bulkRNA/tooth/WGCNA/conserved_tooth_motifs/knownResults.txt", row.names=NULL, header=FALSE, sep='\t', skip = 1)
+colnames(motif)<-c('TF', 'Motif', 'PValue', 'LogPValue', 'AdjustedPValue', 'Hits', 'PctHits', 'BgdHits', 'PctBgd')
+motif$logqvalue<-(-log10(motif$AdjustedPValue))
+motif$PctHits<-as.numeric(gsub("%", '', motif$PctHits))
+motif$PctBgd<-as.numeric(gsub("%", '', motif$PctBgd))
+motif$enrichment<-motif$PctHits/motif$PctBgd
+motif$logenrichment<-(log2(motif$PctHits/motif$PctBgd))
+motif$logHits<-(log2(motif$Hits))
+motif$TF<-gsub('\\(.*', '', motif$TF)
+motif$logqvalue<-gsub("Inf", '5', motif$logqvalue)
+motif$logqvalue<-as.numeric(motif$logqvalue)
+jpeg("TSE_Motif_bubbleplot.jpeg", height=1000, width=1000, res=115)
+ggplot(motif, aes(x=logenrichment, y=logqvalue, size=Hits, color=logqvalue, label=TF)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Motif Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="BH Corrected P Value (-Log10)", colour="Log Adjusted P Value", size="Number of Motif Hits Genome-Wide") + geom_label_repel(max.overlaps=50, aes(logenrichment, logqvalue, label=TF), data=subset(motif, logqvalue >= 1.3 & logenrichment >= 0.25)) + geom_hline(yintercept=1.3) + scale_color_gradient2(midpoint=0, low="black", mid='grey', high="red") + ylim(-0.1, 5.5)
+dev.off()
+pdf("TSE_Motif_bubbleplot.pdf", height=10, width=10)
+ggplot(motif, aes(x=logenrichment, y=logqvalue, size=Hits, color=logqvalue, label=TF)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Motif Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="BH Corrected P Value (-Log10)", colour="Log Adjusted P Value", size="Number of Motif Hits Genome-Wide") + geom_label_repel(max.overlaps=50, aes(logenrichment, logqvalue, label=TF), data=subset(motif, logqvalue >= 1.3)) + geom_hline(yintercept=1.3) + scale_color_gradient2(midpoint=0, low="black", mid='grey', high="red") + ylim(-0.1, 5.5)
+dev.off()
+
+motif2<-read.table(file="~/cotney/analysis/bulkRNA/tooth/WGCNA/conserved_CF_motifs/knownResults.txt", row.names=NULL, header=FALSE, sep='\t')
+colnames(motif2)<-c('TF', 'Motif', 'PValue', 'LogPValue', 'AdjustedPValue', 'Hits', 'PctHits', 'BgdHits', 'PctBgd')
+motif2$logqvalue<-(-log10(motif2$AdjustedPValue))
+motif2$PctHits<-as.numeric(gsub("%", '', motif2$PctHits))
+motif2$PctBgd<-as.numeric(gsub("%", '', motif2$PctBgd))
+motif2$enrichment<-motif2$PctHits/motif2$PctBgd
+motif2$logenrichment<-(log2(motif2$PctHits/motif2$PctBgd))
+motif2$logHits<-(log2(motif2$Hits))
+motif2$TF<-gsub('\\(.*', '', motif2$TF)
+motif2$logqvalue<-gsub("Inf", '5', motif2$logqvalue)
+motif2$logqvalue<-as.numeric(motif2$logqvalue)
+
+combined<-merge(motif,motif2, by='TF', all=TRUE)
+##########DONT USE ADJUSTED P VALUE
+combined<-combined[,c(1,5,12,17,24)]
+combined$deltap<-combined$AdjustedPValue.x-combined$AdjustedPValue.y
+combined<-combined[order(combined$deltap),]
+####X AXIS VALUE IS LOGFOLD ENRICHMENT IN TOOTH OR LOG OF HITS IN TOOTH
