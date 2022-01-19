@@ -1,0 +1,105 @@
+#in R
+mm10vista<-read.table(file="mm10_combined_positive_VISTA.txt")
+mm10vista<-mm10vista[order(mm10vista$V4),]
+mm10vista<-mm10vista[!duplicated(mm10vista$V4),]
+
+vistaall<-read.table(file="Combined_positive_VISTA.txt", header=FALSE)
+vistaall$V5<-paste(vistaall$V1, vistaall$V5, vistaall$V6, sep="_")
+vistaall<-vistaall[order(vistaall$V5),]
+vistaall<-vistaall[!duplicated(vistaall$V5),]
+vistaall<-vistaall[which(vistaall$V5 %in% mm10vista$V4),]
+allposenh<-length(vistaall$V4)
+
+vista<-read.table(file="Combined_cf_positive_VISTA.txt", header=FALSE)
+vista$V5<-paste(vista$V1, vista$V5, vista$V6, sep="_")
+vista<-vista[order(vista$V5),]
+vista<-vista[which(vista$V5 %in% mm10vista$V4),]
+cfposenh<-length(vista$V5)
+ncfvista<-as.numeric(allposenh)-as.numeric(cfposenh)
+
+all1<-read.table(file="embryonic_tooth_enhancers_VISTA_overlap.bed")
+all1<-all1[!duplicated(all1$V7),]
+allvista_tooth<-length(all1$V7)
+cfposvista_tooth<-length(all1[which(all1$V7 %in% vista$V5),7])
+
+toothpctcf<-cfposvista_tooth/(allvista_tooth)
+
+vista_notooth<-length(vistaall$V5)-allvista_tooth
+cfposenh_notooth<-cfposenh-cfposvista_tooth
+
+nontoothpctcf<-cfposenh_notooth/vista_notooth
+
+#######################here we are finding 
+##[(Vista CF+ in tooth)/(Vista all+ in tooth)]/[(Vista CF+ not in tooth)/(Vista all+ not in tooth)]
+foldenrichment<-toothpctcf/nontoothpctcf
+###this is 2.92 fold enrichment!!!
+
+#here we'll make a table
+data <- matrix(c(allvista_tooth, vista_notooth, cfposvista_tooth, cfposenh_notooth, (allvista_tooth-cfposvista_tooth), (vista_notooth-cfposenh_notooth)), ncol=3)
+rownames(data) <- c('VISTA Enhancers in Tooth Enhancers', 'VISTA Enhancers not in Tooth Enhancers')
+colnames(data) <- c('All VISTA +', 'Positive in CF Tissue', 'Negative in CF Tissue')
+data <- as.table(data)
+dataa<-addmargins(data)
+fisher.test(data[,c(2,3)])
+
+#now for tooth-specific enhancers
+all<-read.table(file="strong_novel_embryonic_tooth_enhancers_VISTA_overlap.bed")
+all<-all[!duplicated(all$V8),]
+allvista_toothse<-length(all$V8)
+cfposvista_toothse<-length(all[which(all$V8 %in% vista$V5),7])
+
+toothsepctcf<-cfposvista_toothse/(allvista_toothse)
+
+vista_notoothse<-length(vistaall$V5)-allvista_toothse
+cfposenh_notoothse<-cfposenh-cfposvista_toothse
+
+nontoothpctcfse<-cfposenh_notoothse/vista_notoothse
+
+#######################here we are finding 
+##[(Vista CF+ in tooth specific)/(Vista all+ in tooth specific)]/[(Vista CF+ not in tooth specific)/(Vista all+ not in tooth specific)]
+foldenrichment2<-toothsepctcf/nontoothpctcfse
+###this is 2.78 fold enrichment!!!
+
+#here we'll make a table
+data2 <- matrix(c(allvista_toothse, vista_notoothse, cfposvista_toothse, cfposenh_notoothse, (allvista_toothse-cfposvista_toothse), (vista_notoothse-cfposenh_notoothse)), ncol=3)
+rownames(data2) <- c('VISTA Enhancers in Tooth Specific Enhancers', 'VISTA Enhancers not in Tooth Specific Enhancers')
+colnames(data2) <- c('All VISTA +', 'Positive in CF Tissue', 'Negative in CF Tissue')
+data2 <- as.table(data2)
+data2a<-addmargins(data2)
+fisher.test(data2[,c(2,3)])
+
+
+pdf(file="mosaicplot_VISTA_toothenh.pdf")
+mosaicplot(data, main='CF VISTA Enhancers', xlab='Enhancer Source', ylab='Tissue Positivity in VISTA')
+mosaicplot(data2, main='CF VISTA Enhancers', xlab='Enhancer Source', ylab='Tissue Positivity in VISTA')
+dev.off()
+
+write.table(all[which(all$V8 %in% vista$V5),c(5:8)], file="VISTA_enhancers_in_tooth_specific_enhancer_cf_pos.bed", quote=FALSE, col.names=FALSE)
+write.table(all1[which(all1$V7 %in% vista$V5),c(4:7)], file="VISTA_enhancers_in_tooth_cf_pos.bed", quote=FALSE, col.names=FALSE)
+
+library(ggplot2)
+library(patchwork)
+pdf(file="barplot_VISTA_toothenh.pdf", height=11, width=8.5)
+
+datab<-data[,2]/data[,1]
+dataa<-data.frame(datab)
+rownames(dataa)<-c('% CF+ VISTA Enhancers Found in Tooth Enhancers', '% CF+ VISTA Enhancers Not Found in Tooth Enhancers')
+colnames(dataa)<-c('data')
+
+data2b<-data2[,2]/data2[,1]
+data2a<-data.frame(data2b)
+rownames(data2a)<-c('% CF+ VISTA Enhancers Found in Tooth Specific Enhancers', '% CF+ VISTA Enhancers Not Found in Tooth Specific Enhancers')
+colnames(data2a)<-c('data')
+data3<-rbind(dataa, data2a)
+
+data3$Var1<-rownames(data3)
+data3$Var2<-gsub('\\% CF\\+ VISTA Enhancers Found in |\\% CF\\+ VISTA Enhancers Not Found in ', '', data3$Var1)
+data3$Var1<-gsub(' Specific Enhancers | Enhancers', '', data3$Var1)
+
+ggplot(data3, aes(fill=Var1, y=data, x=Var2)) + geom_bar(position="fill", stat="identity") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12), aspect.ratio=1, legend.position='none')
+dev.off()
+
+##############VISTA_enhancers_in_tooth_cf_pos.bed is where all the good stuff is!!!!!!!!!!!!
+
+
+
