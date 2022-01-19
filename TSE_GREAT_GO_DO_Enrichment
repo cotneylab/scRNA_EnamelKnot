@@ -1,0 +1,178 @@
+
+##########USE THE REGULAR ARCHR ENV, NOT THE SNAPSHOT
+##run great
+library(ggplot2)
+library(rGREAT)
+library(clusterProfiler)
+set.seed(123)
+bed<-read.table(file="conserved_trong_novel_embryonic_tooth_enhancers.bed")
+colnames(bed)<-c('chr', 'start', 'end')
+background<-read.table(file="conserved_all_strong_enhancers_background.bed")
+colnames(background)<-c('chr', 'start', 'end')
+#job=submitGreatJob(bed, bg=background, species='mm10', rule="basalPlusExt". adv_upstream=500, adv_downstream=500)
+job = submitGreatJob(bed, bg=background, species='mm10')
+
+tb=getEnrichmentTables(job, category=c("Phenotype"))
+
+tb2=getEnrichmentTables(job, category=c("GO"))
+
+geneenh<-plotRegionGeneAssociationGraphs(job)
+human_DO<-tb[[3]]
+mouse_DO<-tb[[1]]
+human_GO<-tb2[[2]]
+
+write.table(human_DO, file="strong_novel_tooth_enh_genetarget_DO.txt", sep='\t')
+write.table(human_GO, file="strong_novel_tooth_enh_genetarget_GO.txt", sep='\t')
+write.table(mouse_DO, file="strong_novel_tooth_enh_genetarget_mouse_pheno.txt", sep='\t')
+
+geneenh<-as.data.frame(geneenh)
+write.table(geneenh, file="strong_novel_tooth_enh_genetarget_enhancerloops.txt", sep='\t', quote = FALSE, col.names = FALSE)
+genelist<-geneenh$gene
+write.table(genelist, file="strong_novel_tooth_enh_genetargets.txt", sep='\t')
+
+#david = enrichDAVID(gene = genelist, idType="ENSEMBL_GENE_ID")
+
+sig_human_DO<-human_DO[which(human_DO$Hyper_Adjp_BH <= 0.05),]
+sig_mouse_DO<-mouse_DO[which(mouse_DO$Hyper_Adjp_BH <= 0.05),]
+sig_human_GO<-human_GO[which(human_GO$Hyper_Adjp_BH <= 0.05),]
+sig_human_DO<-sig_human_DO[order(sig_human_DO$Hyper_Adjp_BH),]
+sig_human_GO<-sig_human_GO[order(sig_human_GO$Hyper_Adjp_BH),]
+sig_mouse_DO<-sig_mouse_DO[order(sig_mouse_DO$Hyper_Adjp_BH),]
+
+#sig_human_DO<-head(sig_human_DO, 20)
+#sig_mouse_DO<-head(sig_mouse_DO, 20)
+#sig_human_GO<-head(sig_human_GO, 20)
+
+sig_human_DO<-sig_human_DO[order(sig_human_DO$Hyper_Adjp_BH),]
+sig_human_GO<-sig_human_GO[order(sig_human_GO$Hyper_Adjp_BH),]
+sig_mouse_DO<-sig_mouse_DO[order(sig_mouse_DO$Hyper_Adjp_BH),]
+
+value_bp3<-data.frame(sig_human_GO)
+value_bp3<-value_bp3[c(1:100),c(1,13)]
+write.table(value_bp3, file='enhancergenes_for_revigo_ontology.txt', sep='\t', row.names=F, col.name=F, quote=F)
+#####plug that file into revigo to get the r script to make the figure
+
+
+sig_human_DO$logBH<- -log10(sig_human_DO$Hyper_Adjp_BH)
+sig_human_GO$logBH<- -log10(sig_human_GO$Hyper_Adjp_BH)
+sig_mouse_DO$logBH<- -log10(sig_mouse_DO$Hyper_Adjp_BH)
+
+write.table(sig_human_DO, file="strong_novel_tooth_enh_genetarget_DO.txt", sep='\t')
+write.table(sig_human_GO, file="strong_novel_tooth_enh_genetarget_GO.txt", sep='\t')
+write.table(sig_mouse_DO, file="strong_novel_tooth_enh_genetarget_mouse_pheno.txt", sep='\t')
+
+sig_human_DO_relevant_all_enhancergenes<-sig_human_DO[grep("face|ooth|acial|dentin|dental", sig_human_DO$name),]
+sig_human_DO_relevant_all_enhancergenes$name <- factor(sig_human_DO_relevant_all_enhancergenes$name, levels = sig_human_DO_relevant_all_enhancergenes$name)
+sig_human_GO_relevant_all_enhancergenes<-sig_human_GO[grep("face|acial|tooth|dentin|dental", sig_human_GO$name),]
+sig_human_GO_relevant_all_enhancergenes$name <- factor(sig_human_GO_relevant_all_enhancergenes$name, levels = sig_human_GO_relevant_all_enhancergenes$name)
+pdf(file="GREAT_enhancer_toothrelevant_DO.pdf", height=8.5, width=11)
+ggplot(sig_human_DO_relevant_all_enhancergenes, aes(x=logBH, y=name, size=as.numeric(Hyper_Fold_Enrichment), color=logBH)) + theme(aspect.ratio=1) + labs(y="Ontology Category", x="BH Corrected P Value (-Log10)", size="Fold Enrichment", color="Corrected P Value") + geom_point() + theme(aspect.ratio=1) + geom_vline(xintercept = 1.3)
+dev.off()
+pdf(file="GREAT_enhancer_toothrelevant_GO.pdf", height=8.5, width=11)
+ggplot(sig_human_GO_relevant_all_enhancergenes, aes(x=logBH, y=name, size=as.numeric(Hyper_Fold_Enrichment), color=logBH)) + theme(aspect.ratio=1) + labs(y="Ontology Category", x="BH Corrected P Value (-Log10)", size="Fold Enrichment", color="Corrected P Value") + geom_point()+ theme(aspect.ratio=1) + geom_vline(xintercept = 1.3)
+dev.off()
+
+####################now we make sure all the target genes actually exist in our other datasets
+
+gencode<-read.table(file='/home/FCAM/ewentworth/cotney/genome/mm10/mm10_refGene_TSS_coord.bed')
+targets<-read.table(file='tooth_target_gene_coords.txt')
+enhancers1<-read.table(file='~/cotney/analysis/bulkRNA/tooth/WGCNA/strong_novel_tooth_enh_genetarget_enhancerloops.txt')
+enhancers<-enhancers1[,c(2,3,4,5,6,7,8)]
+rm<-setdiff(enhancers$V6, gencode$V7)
+enhancers<-enhancers[which(enhancers$V7 %in% gencode$V5),]
+enhancers<-enhancers[grep("Rik", enhancers$V7, invert=TRUE),]
+enhancers$V8<-as.numeric(enhancers$V8)
+enhancers$V8<-abs(enhancers$V8)
+enhancers=enhancers[order(enhancers[,'V2'], enhancers[,'V3'], enhancers[,'V4'], enhancers[,'V8']),]
+enhancers$name<-paste(enhancers$V2, enhancers$V3, enhancers$V4, sep="_")
+enhancers<-enhancers[!duplicated(enhancers$name),]
+
+######################################now we assign top connected genes, by taking the top 10% of enhancer connected genes 
+enhancers<-data.frame(table(enhancers$V7))
+enhancergenes<-as.character(unique(enhancers$Var1))
+enhancers<-enhancers[order(enhancers$Freq),]
+num<-round(length(enhancergenes)/10)
+topnum<-tail(enhancers, num)
+min<-topnum[1,2]
+topenhancergenes<-as.character(enhancers[which(enhancers$Freq >= min),1])
+
+###################just to see ontologies of genes with certain numbers of enhancers (expect housekeeping to have 1-2 TSEs, specificity and importance should increase as assigned TSE # increases)
+enhancers1<-enhancers[which(enhancers$Freq == 1),1]
+enhancers2<-enhancers[which(enhancers$Freq == 2),1]
+enhancers3<-enhancers[which(enhancers$Freq == 3),1]
+enhancers4<-enhancers[which(enhancers$Freq == 4),1]
+enhancers5<-enhancers[which(enhancers$Freq >=5 & enhancers$Freq < 10),1]
+enhancers10<-enhancers[which(enhancers$Freq >=10),1]
+#tooth<-readRDS(file="~/cotney/analysis/scrna/e14_molar/for_publication/2_redo/FINAL_tooth_properGODO_forWGCNA_DESeq.rds")
+
+#make sure these genes exist in all our datasets
+topenhancergenes<-intersect(rownames(tooth),topenhancergenes)
+topenhancergenes<-topenhancergenes[order(topenhancergenes)]
+enhancergenes<-intersect(rownames(tooth),enhancers$Var1)
+
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+
+
+#############gene ontology and disease ontology enrichment; we are grepping for the tooth relevant terms to ensure these are enriched. top terms are almost always cancer related, as these categories have the largest # of associated genes. 
+value_bp2 <- enrichGO(gene = topenhancergenes,
+                      universe = rownames(tooth),
+                      OrgDb = 'org.Mm.eg.db', 
+                      keyType = 'SYMBOL',
+                      readable = F,
+                      ont = "BP",
+                      pvalueCutoff = 0.05,
+                      pAdjustMethod = "BH")
+value_bp2<-simplify(value_bp2, cutoff=0.75, by="qvalue")
+value_bp2<-value_bp2[grep('development|cranio|facial|patterning', value_bp2$Description),]
+library(multienrichjam)
+value_bp3<-enrichDF2enrichResult(enrichDF=value_bp2, keyColname=c("ID"), geneColname=c("geneID"), geneRatioColname=c("GeneRatio"), geneHits="geneHits", pvalueColname=c("p.adjust"), descriptionColname=c('Description'))
+netplot3<-enrichplot::cnetplot(value_bp3, layout='kk', categorySize='p.adjust', circular=TRUE, color_category="red", color_gene="black", cex_label_category = 1.2, showCategory=5, node_label='all') + theme(aspect.ratio=1, legend.position='none', text = element_text(size = 14)) 
+human_disease <- convertHumanGeneList(topenhancergenes)
+human_disease<-bitr(human_disease, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+value_cc2<-enrichDGN(human_disease$ENTREZID, readable=T)
+value_cc2<-value_cc2[grep('tooth|dentin|dental|enamel', value_cc2$Description),]
+library(multienrichjam)
+value_cc3<-enrichDF2enrichResult(enrichDF=value_cc2, keyColname=c("ID"), geneColname=c("geneID"), geneRatioColname=c("GeneRatio"), geneHits="geneHits", pvalueColname=c("p.adjust"), descriptionColname=c('Description'))
+netplot4<-enrichplot::cnetplot(value_cc3, layout='kk', categorySize='qvalue', circular=FALSE, color_category="red", color_gene="black", cex_label_category = 1.2, showCategory=5, node_label='all') + theme(aspect.ratio=1, legend.position='none', text = element_text(size = 10)) 
+
+value_bp2 <- enrichGO(gene = enhancergenes,
+                      universe = rownames(tooth),
+                      OrgDb = 'org.Mm.eg.db', 
+                      keyType = 'SYMBOL',
+                      readable = F,
+                      ont = "BP",
+                      pvalueCutoff = 0.05,
+                      pAdjustMethod = "BH")
+value_bp2<-simplify(value_bp2, cutoff=0.75, by="qvalue")
+value_bp2<-value_bp2[grep('development|cranio|facial|patterning', value_bp2$Description),]
+library(multienrichjam)
+value_bp3<-enrichDF2enrichResult(enrichDF=value_bp2, keyColname=c("ID"), geneColname=c("geneID"), geneRatioColname=c("GeneRatio"), geneHits="geneHits", pvalueColname=c("p.adjust"), descriptionColname=c('Description'))
+netplot3a<-enrichplot::cnetplot(value_bp3, layout='kk', categorySize='p.adjust', circular=TRUE, color_category="red", color_gene="black", cex_label_category = 1.2, showCategory=5, node_label='all') + theme(aspect.ratio=1, legend.position='none', text = element_text(size = 14)) 
+human_disease <- convertHumanGeneList(enhancergenes)
+human_disease<-bitr(human_disease, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+value_cc2<-enrichDGN(human_disease$ENTREZID, readable=T)
+value_cc2<-value_cc2[grep('tooth|dentin|dental|enamel', value_cc2$Description),]
+library(multienrichjam)
+value_cc3<-enrichDF2enrichResult(enrichDF=value_cc2, keyColname=c("ID"), geneColname=c("geneID"), geneRatioColname=c("GeneRatio"), geneHits="geneHits", pvalueColname=c("p.adjust"), descriptionColname=c('Description'))
+netplot4a<-enrichplot::cnetplot(value_cc3, layout='kk', categorySize='qvalue', circular=FALSE, color_category="red", color_gene="black", cex_label_category = 1.2, showCategory=5, node_label='all') + theme(aspect.ratio=1, legend.position='none', text = element_text(size = 10)) 
+
+pdf(file="conserved_novel_tooth_enhancers_GO_netplot.pdf", height=15, width=15)
+netplot3a
+dev.off()
+
+pdf(file="conserved_novel_tooth_enhancers_DO_netplot.pdf", height=15, width=15)
+netplot4a
+dev.off()
+
+pdf(file="conserved_novel_tooth_enhancers_topenhgene_DO_netplot.pdf", height=15, width=15)
+netplot4
+dev.off()
