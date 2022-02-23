@@ -1,0 +1,504 @@
+library(Seurat)
+library(ggplot2)
+library(magrittr)
+library(harmony)
+library(DESeq2)
+library(SingleCellExperiment)
+library(patchwork)
+library(ggrepel)
+library(wordcloud)
+library(RColorBrewer)
+library(eulerr)
+library(wordcloud2)
+library(scWGCNA)
+library(tm)
+library("clusterProfiler")
+library("gplots")
+library("devtools")
+library("DOSE")
+library("dplyr")
+library("ggplot2")
+library("AnnotationDbi")
+library("BiocParallel")
+library("RColorBrewer")
+library("org.Mm.eg.db")
+library(enrichplot)
+library("ggupset")
+library(ggsignif)
+library(gplots)
+library(reshape)
+library(ggvenn)
+library(readxl)
+set.seed(123)
+files<-list.files(path=".", pattern="_for_integration.rds")
+flw<-vector("list", length(files))
+for (filename in files){
+flw[[filename]]<-gsub("_for_integration.rds", "", filename)
+name<-readRDS(file=filename)
+assign(flw[[filename]], name)
+}
+#############merge the replicates into one Seurat object
+name<-merge(molar_1, y=c(molar_4, molar_7, molar_9), add.cell.ids=c("molar_1", "molar_4", "molar_7", "molar_9"), project="tooth")
+name$orig.ident<-gsub("_A.*|_T.*|_G.*|_C.*", "", colnames(name))
+name[["percent.mt"]]<-PercentageFeatureSet(name, pattern="^mt-")
+z<-print(VlnPlot(name, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by="orig.ident", cols=c("Red", "Yellow", "Pink", "Orange")))
+name <- subset(name, subset = nFeature_RNA > 200 & percent.mt < 5 )
+name <- NormalizeData(name)
+name <- FindVariableFeatures(name, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(name), 20)
+all.genes <- rownames(name)
+############add in information about cell cycle
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+m.s.genes <- convertHumanGeneList(cc.genes.updated.2019$s.genes)
+m.g2m.genes <- convertHumanGeneList(cc.genes.updated.2019$g2m.genes)
+name<-CellCycleScoring(name, s.features=m.s.genes, g2m.features=m.g2m.genes, set.ident=TRUE)
+tooth <- ScaleData(name, features = rownames(name))
+tooth <- RunPCA(tooth, features = VariableFeatures(name))
+print(tooth[["pca"]], dims = 1:5, nfeatures = 5)
+tooth <- JackStraw(tooth, num.replicate = 100)
+tooth <- ScoreJackStraw(tooth, dims = 1:20)
+b<-JackStrawPlot(tooth, dims = 1:15)
+c<-ElbowPlot(tooth)
+tooth <- FindNeighbors(tooth, dims = 1:15)
+tooth <- FindClusters(tooth, resolution = 0.4)
+tooth <- RunUMAP(tooth, dims = 1:15)
+saveRDS(tooth, file = "1_tooth_with_rep_data_original_cluster_numbers.rds")
+
+x<-levels(unique(tooth$seurat_clusters))
+f<-c()
+flw<-vector("list", length(x))
+background <- bitr(rownames(tooth), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+data2<-NULL
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+
+for (val in x){
+print(val)
+flw[[val]]<-FindMarkers(tooth, ident.1 = val, test.use = "DESeq2", min.pct=0.25, logfc.threshold=0.5, max.cells.per.ident=400)
+flw[[val]]<-subset(flw[[val]], avg_logFC > 0.50)
+#flw[[val]]<-read.table(file=(gsub("/", "_", gsub(" ", "", paste("tooth_clustermarkers", val, ".txt", sep="")))))
+assign(gsub(" |\\+", "", paste("clustermarkers", val, sep="")), flw[[val]])
+y<-as.data.frame(get(paste("clustermarkers", val, sep="")))
+n<-tail(y[order(y$avg_logFC),], 10)
+f<-rbind(f, n)
+value_bp <- enrichGO(gene = rownames(y),
+                      universe = rownames(tooth),
+                      OrgDb = org.Mm.eg.db, 
+                      keyType = 'SYMBOL',
+                      readable = F,
+                      ont = "BP",
+                      qvalueCutoff = 0.05,
+                      pAdjustMethod = "bonferroni")
+human_disease <- convertHumanGeneList(rownames(y))
+human_disease<-bitr(human_disease, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+human_disease_bg <- convertHumanGeneList(rownames(tooth))
+human_disease_bg <-bitr(human_disease_bg, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+#value_cc <- enrichDO(gene = human_disease$ENTREZID,              ont           = "DO",              pvalueCutoff  = 0.05, universe      = human_disease_bg$ENTREZID,              minGSSize     = 5,              maxGSSize     = 500,              qvalueCutoff  = 0.05,              readable      = FALSE)
+value_cc<-enrichDGN(human_disease$ENTREZID)
+value_bp1<-simplify(value_bp, cutoff=0.75, by="qvalue")
+value_bp1<-as.data.frame(value_bp)
+print(value_bp1)
+assign(paste(val, "ontology", sep="_"), value_bp1)
+l<-dotplot(value_bp, showCategory=10)
+d<-barplot(value_cc, showCategory=10)
+assign(paste(val, "dotplot", sep=""), l)
+assign(paste(val, "disease_barplot", sep=""), d)
+data<-as.data.frame(WhichCells(object=tooth, ident=val))
+data[,2]<-value_bp1[1,2]
+data[,3]<-value_cc[1,2]
+colnames(data)<-c("Cell", "GO", "Disease")
+data2<-rbind(data2, data)
+v3<-strsplit(value_bp1[1,8], "/")
+assign(paste(gsub(" |-", "", value_bp1[1,2]), "GOModule", sep=""), v3)
+}
+rm("ribonucleoproteincomplexbiogenesisGOModule", "RNAsplicingGOModule")
+data<-as.data.frame(WhichCells(object=tooth, ident=c("4", "12")))
+data[,2]<-c("chromosome segregation")
+colnames(data)<-c("Cell", "GO", "Disease")
+data2<-data2[ ! data2$Cell %in% data$Cell,]
+data2<-rbind(data, data2)
+rownames(data2)<-data2[,1]
+tooth<-AddMetaData(tooth, metadata=data2)
+tooth$Cell<-NULL
+saveRDS(tooth, file = "1_tooth_with_rep_data_original_cluster_numbers.rds")
+
+tooth1<-tooth
+
+tooth<-RenameIdents(tooth, `0`="Mesenchyme", `1`="Mesenchyme", `2`='Mesenchyme', `3`='Mesenchyme', `4`='Epithelium', `5`='Mesenchyme', `6`='Epithelium', `7`='Mesenchyme', `8`='Epithelium', `9`='Red Blood Cells', `10`='Bone Progenitor Cells', `11`='Endothelium', `12`='Epithelium', `13`='Other Blood Cells', `14`='Epithelium', `15`='Perivascular Cells')
+
+tooth$idents<-Idents(tooth)
+standardmarkers<-c('Msx1', "Pitx2", 'Hba-a1', "Cdh5", "Fcer1g", "Sox10")
+p7<-DimPlot(tooth, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+a7<-FeaturePlot(tooth, features=standardmarkers, ncol=2, coord.fixed=TRUE)
+f <- DimPlot(tooth, reduction="umap", group.by="idents", pt.size=1.5, label.size=6, label=TRUE, repel=TRUE, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) & theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1, legend.position="none")
+g <- DimPlot(tooth1, group.by="GO", pt.size=1.5, cols=c("#636B59", "#CDE2B8", "#90A5A9", "#00A36C", "#00FFFF", "#228B22", "#7CFC00", "#0000FF", "#088F8F", "#0096FF", "#B4C424", "#C4B454", "#DFFF00", "#96DED1")) + theme(legend.text=element_text(size=15), legend.position="right") + theme(aspect.ratio = 1)
+h <- DotPlot(tooth, features = c("Mesenchyme1", "Epithelium1", "Endothelium1", "Immune1", "Perivascular1"), group.by="idents", cols=c("red", "blue"), dot.scale=10) + theme(aspect.ratio = 1)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=20), axis.text.y=element_text(size=20)) + labs(y="Cluster Classification", x="Gene Module from Adult Incisor") 
+
+pdf(file="Figure2.pdf", height=30, width=30)
+#q<-(g/f)|a7|h
+q<-(g|a7)/(h|f)
+q
+dev.off()
+ggsave("Figure2.eps", q, height=30, width=30)
+ggsave("Figure2.svg", q, height=30, width=30)
+
+jpeg(file="Figure2.jpg", height=3000, width=3000)
+q
+dev.off()
+
+tooth[["RNA"]]@counts<-as.matrix(tooth[["RNA"]]@counts)+1
+saveRDS(tooth, file = "2_tooth_with_rep_data_renamed.rds")
+
+
+
+
+
+enamel<-subset(tooth, idents=c("Epithelium"))
+enamel$Endothelium1<-NULL
+enamel$Epithelium1<-NULL
+enamel$Perivascular1<-NULL
+enamel$Immune1<-NULL
+enamel$Mesenchyme1<-NULL
+enamel$Endothelium<-NULL
+enamel$Epithelium<-NULL
+enamel$Perivascular<-NULL
+enamel$Immune<-NULL
+enamel$Mesenchyme<-NULL
+enamel <- FindNeighbors(enamel, dims = 1:15)
+enamel <- FindClusters(enamel, resolution = 0.2)
+enamel <- RunUMAP(enamel, dims = 1:15)
+Idents(enamel)<-enamel$seurat_clusters
+saveRDS(enamel, file = "3_epithelium_only_numbered_clusters.rds")
+
+enamel.markers <- FindAllMarkers(enamel, only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.5, slot = "counts", max.cells.per.ident=400)
+enamel.markers<-subset(enamel.markers, avg_logFC > 0.5)
+write.table(enamel.markers, file="Supplemental_Table_AllEpitheliumMarkers.tsv", sep="\t")
+
+bite<-read.table(file="biteit_enamelknot_genes.txt")
+bite<-bite$V1
+
+ekjax<-read.table(file="JAX_enamelknot_genes.txt")
+ekjax<-ekjax$V1
+pekjax<-read.table(file="JAX_primaryenamelknot_genes.txt")
+pekjax<-pekjax$V1
+allgenes<-rownames(tooth)
+jax<-union(pekjax, bite)
+
+enamel<-AddModuleScore(object=enamel, features=list(jax), pool = NULL, ctrl = 1000, name = "CEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "CEK", seed = 1, search = TRUE)
+
+enamel$idents<-Idents(enamel)
+standardmarkers<-c("Shh", 'Cdkn1a', "Lef1", 'Wnt6', 'Fgf3')
+standardmarkers1<-c("Shh", 'Cdkn1a', "Lef1")
+
+
+dentalepimarkers<-c('Bmp4', 'Bmp2', 'Fgf4', 'Fgf6', 'Shh', 'Wnt4', 'Wnt6', 'Wnt10a', 'Wnt10b', 'Eda', 'Edar', 'Pitx2')
+enamel<-AddModuleScore(object=enamel, features=list(dentalepimarkers), pool = NULL, ctrl = 1000, name = "StandardDentalEpi", seed = 1, search = TRUE)
+
+enamel<-RenameIdents(enamel, `0`="Epithelium", `1`="Epithelium", `2`="Epithelium", `3`="Epithelium", `4`="Epithelium", `5`= "Epithelium", `6`="Epithelium", `7`="Enamel Knot")
+
+pct<-table(enamel$Phase, enamel$idents)
+pct<-as.data.frame(pct)
+pct<-subset(pct, Freq > 0)
+pdf(file="SupplementalFigure3.pdf")
+c<-ggplot(pct, aes(x = Var2, y = Freq, fill = Var1)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Cluster") + ylab("Phase") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme(aspect.ratio = 1)
+d<-ggplot(pct, aes(x = Var1, y = Freq, fill = Var2)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Phase") + ylab("Cluster") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme(aspect.ratio = 1)
+d | c
+dev.off()
+
+temp<-subset(enamel, idents = "Enamel Knot")
+ekexpression<-as.data.frame(AverageExpression(temp, features = rownames(temp), return.seurat = FALSE, verbose = TRUE))
+ekexpression$Gene<-rownames(ekexpression)
+colnames(ekexpression)<-c("expression", "Gene")
+ekexpression<-subset(ekexpression, expression > 0)
+ekexpression<-ekexpression[order(ekexpression$expression),]
+ekexpression<-rownames(subset(ekexpression, expression > 0))
+write.table(ekexpression, file="ek_all_genes.txt")
+
+my_cols <- c('6'='#c7be02','2'='#a8a32d','3'='#ABA300','0'='#524f08','4'='#adab7d', '7'='#f2ec5c','5'='#c7c595', '1'='#91906d')
+my_cols2 <- my_cols[order(as.integer(names(my_cols)))]
+scales::show_col(my_cols2)
+
+p6<-FeaturePlot(tooth, features = "CEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+
+p7<-DimPlot(enamel, reduction = "umap", group.by = "seurat_clusters", pt.size=1.5, label.size=14, cols=my_cols2) + theme(legend.text=element_text(size=15)) + theme(aspect.ratio = 1)
+
+a1 <- FeaturePlot(enamel, features = "Shh", combine = TRUE, pt.size=2) + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+a2 <- FeaturePlot(enamel, features = "Wnt10b", combine = TRUE, pt.size=2) + theme(aspect.ratio = 1)
+a3 <- FeaturePlot(enamel, features = "Lef1", combine = TRUE) + theme(aspect.ratio = 1)
+a4 <- FeaturePlot(enamel, features = "Wnt6", combine = TRUE) + theme(aspect.ratio = 1)
+
+c<-ggplot(pct, aes(x = Var2, y = Freq, fill = Var1)) + theme_bw(base_size = 15) + geom_col(position = "fill", width = 0.5) + xlab("Cluster") + ylab("Phase") + theme(legend.title = element_blank()) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme(aspect.ratio = 1, axis.text=element_text(size=20))
+enamel$idents<-Idents(enamel)
+f <- DimPlot(enamel, reduction="umap", group.by="idents", pt.size=1.5, label.size=8, label=TRUE, cols = c('Enamel Knot' = 'red', 'Epithelium' ='#ABA300')) & theme(legend.text=element_text(size=20), legend.position="none") + theme(aspect.ratio = 1)
+
+#g <- DotPlot(enamel, features = standardmarkers, group.by="seurat_clusters") + theme(aspect.ratio = 1) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+h<-FeaturePlot(enamel, features = "CEK1", cols=c('white', 'red'), pt.size=1.5) + labs(title = "Known EK Gene Module Score") + theme(aspect.ratio = 1, plot.title=element_text(size=20))
+
+i<-VlnPlot(enamel, features = "CEK1", slot = "counts", log = FALSE, group.by="seurat_clusters", pt.size = 0.05, cols=my_cols2) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20)) + geom_signif(comparisons = list(c("7", "2"), c('7', '1'), c('7', '3'), c('7', '4'), c('7', '5'), c('7', '6'), c('7', '0')), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6)
+
+j<-VlnPlot(tooth, features = "CEK1", log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) + geom_boxplot(width=0.1,fill="white") + labs(title = "Known EK Gene Module Score", x="Cluster") + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ geom_signif(comparisons = list(c("Mesenchyme", "Epithelium"), c("Epithelium", "Endothelium"), c("Epithelium", "Other Blood Cells"), c("Epithelium", "Red Blood Cells"), c("Epithelium", "Perivascular Cells")), map_signif_level = TRUE, test = "wilcox.test", textsize = 10) + ylim(-0.1,0.6) 
+
+
+pdf(file="Figure3.pdf", height=25, width=20)
+x<-(p6|j)/(p7|a1|a2)/(h|i|f)
+x
+dev.off()
+ggsave("Figure3.eps", x, height=25, width=20)
+jpeg(file="Figure3.jpg", height=2500, width=2000)
+(p6|j)/(p7|a1|a2)/(h|i|f)
+dev.off()
+
+
+saveRDS(enamel, file = "4_epithelium_only_renamed_clusters.rds")
+
+
+enamelknotcells<-WhichCells(object=enamel, ident="Enamel Knot")
+Idents(tooth, cells = enamelknotcells)<-"Enamel Knot"
+tooth$idents<-Idents(tooth)
+
+levels<-data.frame(Idents(tooth))
+x<-unique(levels$Idents)
+flw<-vector("list", length(x))
+for (val in x){
+flw[[val]]<-FindMarkers(tooth, ident.1 = val, test.use = "DESeq2", min.pct=0.25, logfc.threshold=0.5, max.cells.per.ident=400)
+flw[[val]]<-subset(flw[[val]], avg_logFC > 0.5)
+flw[[val]]<-subset(flw[[val]], p_val_adj <=0.05)
+temp<-subset(tooth, idents = val)
+expression<-AverageExpression(temp, features = rownames(temp), return.seurat = FALSE, verbose = TRUE)
+assign(gsub(" |\\+", "", paste("clustermarkers", val, sep="")), flw[[val]])
+write.table(data.frame(flw[[val]]), file=(gsub("/", "_", gsub(" ", "", paste("tooth_clustermarkers_renamed_clusters_all", val, ".txt", sep="")))), sep="\t")
+write.table(data.frame(expression), file=(gsub("/", "_", gsub(" ", "", paste("averageexpression", val, ".txt", sep="")))), sep="\t")
+}
+
+tooth.markers <- FindAllMarkers(tooth, only.pos = TRUE, test.use = "DESeq2", min.pct = 0.25, logfc.threshold=0.5, max.cells.per.ident=400)
+tooth.markers<-subset(tooth.markers, avg_logFC > 0.5)
+tooth.markers<-subset(tooth.markers, p_val_adj<= 0.05)
+
+write.table(tooth.markers, file="Supplemental_Table_5_AllMarkers_Renamed_Clusters_withEK.tsv", sep="\t")
+tooth.marker.genes<-rownames(tooth.markers)
+
+
+EKmarkers<-read.table("tooth_clustermarkers_renamed_clusters_allEnamelKnot.txt")
+
+ekmarkers<-rownames(EKmarkers[order(EKmarkers$avg_logFC),])
+
+bite<-read.table(file="biteit_enamelknot_genes.txt")
+bite<-bite$V1
+
+TPEKmarkers<-rownames(EKmarkers[EKmarkers$avg_logFC > 1,])
+
+ekexpression<-read.table(file="ek_all_genes.txt")
+ekexpression<-ekexpression$x
+ekjax<-read.table(file="JAX_enamelknot_genes.txt")
+ekjax<-ekjax$V1
+pekjax<-read.table(file="JAX_primaryenamelknot_genes.txt")
+pekjax<-pekjax$V1
+allgenes<-rownames(tooth)
+jax<-union(pekjax, bite)
+
+write.table(jax, "SupplementalTable5.txt")
+venn<-list(bite, ekmarkers, TPEKmarkers, ekexpression, ekjax, pekjax, jax, allgenes)
+names(venn)[1]<-c("Bite-It Known EK Genes")
+names(venn)[2]<-c("EK Markers")
+names(venn)[3]<-c("Top EK Markers")
+names(venn)[4]<-c("All Identified EK Genes")
+names(venn)[5]<-c("JAX All EK Genes")
+names(venn)[6]<-c("All Known EK Genes")
+names(venn)[7]<-c("All Identified Bud Stage Genes")
+names(venn)[8]<-c("All Known EK Genes")
+d5<-ggvenn(venn, columns =c("All Known EK Genes", "Top EK Markers"))
+
+
+write.table(TPEKmarkers, file="SupplementalTable8.txt")
+novelekmarkers<-setdiff(ekmarkers, jax)
+
+tooth<-AddModuleScore(object=tooth, features=list(TPEKmarkers), pool = NULL, ctrl = 1000, name = "TPEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(ekmarkers), pool = NULL, ctrl = 1000, name = "PEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(novelekmarkers), pool = NULL, ctrl = 1000, name = "NovelEK", seed = 1, search = TRUE)
+tooth<-AddModuleScore(object=tooth, features=list(jax), pool = NULL, ctrl = 1000, name = "CEK", seed = 1, search = TRUE)
+
+for (featurename in jax){
+l<-FeaturePlot(tooth, features = featurename) + theme(aspect.ratio = 1)
+g2<-VlnPlot(tooth, features = featurename, log = FALSE, group.by="idents", pt.size = 0.05, cols = c('Enamel Knot' = 'red', 'Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Bone Progenitor Cells'='#C77CFF')) + geom_boxplot(width=0.1,fill="white") + labs(title = featurename, x="Cluster") + geom_signif(comparisons = list(c("Mesenchyme", "Enamel Knot"), c("Enamel Knot", "Endothelium"), c("Enamel Knot", "Other Blood Cells"), c("Enamel Knot", "Red Blood Cells"), c("Enamel Knot", "Perivascular Cells"), c("Enamel Knot", "Epithelium")), map_signif_level = TRUE, test = "wilcox.test", textsize = 8) + theme(aspect.ratio = 1, legend.position = "none", text = element_text(size = 20), axis.text=element_text(size=20))+ ylim(-0.1,1.5)
+#print(l|g2)
+}
+pdf(file="Supplemental_AllCombined_UMAPAllCEKGenes.pdf", height=20, width=20)
+DotPlot(tooth, features=jax, cols=c('green', 'purple')) + theme(aspect.ratio = 1) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=15))
+dev.off()
+saveRDS(tooth, file = "FINAL_tooth_with_rep_data_renamed_clusters_EK_module_score.rds")
+
+
+
+#################now integrate in the WGCNA and TSE target genes
+enhancers1<-read.table(file='~/cotney/analysis/bulkRNA/tooth/WGCNA/strong_novel_tooth_enh_genetarget_enhancerloops.txt')
+enhancers<-enhancers1[,c(2,3,4,5,6,7,8)]
+rm<-setdiff(enhancers$V6, gencode$V7)
+enhancers<-enhancers[which(enhancers$V7 %in% gencode$V5),]
+enhancers<-enhancers[grep("Rik", enhancers$V7, invert=TRUE),]
+enhancers$V8<-as.numeric(enhancers$V8)
+enhancers$V8<-abs(enhancers$V8)
+enhancers=enhancers[order(enhancers[,'V2'], enhancers[,'V3'], enhancers[,'V4'], enhancers[,'V8']),]
+enhancers$name<-paste(enhancers$V2, enhancers$V3, enhancers$V4, sep="_")
+enhancers<-enhancers[!duplicated(enhancers$name),]
+
+#enhancers<-read.table(file='~/cotney/analysis/bulkRNA/tooth/WGCNA/strong_novel_tooth_enh_genetargets.txt')
+enhancers<-data.frame(table(enhancers$V7))
+enhancergenes<-as.character(unique(enhancers$Var1))
+enhancers<-enhancers[order(enhancers$Freq),]
+num<-round(length(enhancergenes)/20)
+topnum<-tail(enhancers, num)
+min<-topnum[1,2]
+topenhancergenes<-as.character(enhancers[which(enhancers$Freq >= min),1])
+enhancers1<-enhancers[which(enhancers$Freq == 1),1]
+enhancers2<-enhancers[which(enhancers$Freq == 2),1]
+enhancers3<-enhancers[which(enhancers$Freq == 3),1]
+enhancers4<-enhancers[which(enhancers$Freq == 4),1]
+enhancers5<-enhancers[which(enhancers$Freq >=5 & enhancers$Freq < 10),1]
+enhancers10<-enhancers[which(enhancers$Freq >=10),1]
+
+topenhancergenes<-intersect(rownames(tooth),topenhancergenes)
+topenhancergenes<-topenhancergenes[order(topenhancergenes)]
+enhancergenes<-intersect(rownames(tooth),enhancers$Var1)
+results<-read.table(file="~/cotney/analysis/bulkRNA/tooth/WGCNA/tooth_for_wgcna_module.txt")
+x<-unique(results$ModuleColor)
+for (val in x){
+print(val)
+value1<-results[results$ModuleColor == val,]
+print(dim(value1))
+assign(paste(val, "Module", sep="_"), value1)
+assign(paste(val, "Genes", sep="_"), rownames(value1))
+}
+#x is a list of the sets you're asking for enrichment within; input a list of the names of objects containing vectors of gene names. object names should contain "_Genes" to keep everything straight.
+#y is a list of the interrogation sets you're asking about enrichment OF (smaller set); input a list of names of objects containing vectors of gene names.
+#z is the background set (all genes in the dds object or rds object or all wgcna modules); input is the name of the object that contains vector of all gene names for background pool 
+library(gplot)
+library(eulerr)
+library(ggplot2)
+library(ggplotify)
+EnrichmentPvalueTable<-function(x, y, z){
+PVALUETABLE<-c()
+pdf(file=paste(x, y, "Enrichment_Permutation_and_Venn.pdf", sep=''), height=15, width=10)
+for (NODENAME3 in x){
+NODENAME2<-paste(gsub('_Genes', '', NODENAME3), ' Genes', sep='')
+NODENAME<-get(NODENAME3)
+for(timepoints in y){
+timepoint<-get(timepoints)
+timepointnames<-gsub('markers|_Genes', ' Genes', timepoints)
+completely_contained1 <- euler(c("A" = length(setdiff(NODENAME, timepoint)), "B" = length(setdiff(timepoint, NODENAME)), "A&B" = (length(NODENAME) - length(setdiff(NODENAME, timepoint)))))
+p3<-as.ggplot(plot(completely_contained1, labels = c(NODENAME2, timepointnames), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
+p3<-p3+theme(aspect.ratio=1)
+len<-length(NODENAME)
+d<-NULL
+for (i in 1:10000){
+markers<-sample(z,len)
+d<-rbind(d, length(intersect(markers, timepoint)))
+}
+t<-table(d)
+d<-as.data.frame(d)
+colnames(d)<-c("name")
+pvalue<-c()
+pvalue$pval<-length(which(d$name >= length(intersect(NODENAME, timepoint))))/10000
+pvalue$module<-gsub(' Genes', '', NODENAME2)
+pvalue$celltype<-gsub(' Genes', '', timepointnames)
+pvalue$markersoverlap<-length(intersect(NODENAME, timepoint))
+pvalue$markersexpectedoverlap<-median(d$name)
+pvalue$logFCenrichment<-log((length(intersect(NODENAME, timepoint))+1)/(median(d$name)+1))
+pvalue$logpval<-(-log10(pvalue$pval))
+pvalue<-as.data.frame(pvalue)
+PVALUETABLE<-rbind(PVALUETABLE, pvalue)
+line<-length(intersect(timepoint, NODENAME))+5
+print(plot(t, xlim=c(1,line)))
+print(abline(v=length(intersect(timepoint, NODENAME))))
+print(labs(main=paste("Number of Overlapping Genes From Random Sampling of", len, "Genes", sep=" "), xlab="Number of Overlapping Genes with Marker Genes of Cell Type", ylab="Frequency"))
+}
+}
+dev.off()
+return(PVALUETABLE)
+}
+
+
+
+markersall<-unique(markers$gene)
+
+list1<-c('enhancergenes')
+list2<-ls(pattern='Genes')
+list2<-list2[grep('top10', list2, invert=TRUE)]
+list1<-append(list1, list2)
+list2<-c('epitheliummarkers', 'ekmarkers', 'endotheliummarkers', 'mesenchymemarkers', 'otherbloodcellmarkers', 'perivascularcellmarkers', 'redbloodcellmarkers')
+background<-rownames(tooth)
+PVALUETABLE_scRNA_enhancergenes<-EnrichmentPvalueTable(list1, list2, background)
+
+
+PVALUETABLE_scRNA_enhancergenes_enh<-PVALUETABLE_scRNA_enhancergenes[which(PVALUETABLE_scRNA_enhancergenes$module == "enhancergenes"),]
+PVALUETABLE_scRNA_enhancergenes_enh$padj<-p.adjust(PVALUETABLE_scRNA_enhancergenes_enh$pval, method="BH")
+PVALUETABLE_scRNA_enhancergenes_enh$logpadj<-(-log10(PVALUETABLE_scRNA_enhancergenes_enh$padj))
+PVALUETABLE_scRNA_enhancergenes_enh$logpadj<-gsub('Inf', '4', PVALUETABLE_scRNA_enhancergenes_enh$logpadj)
+write.table(PVALUETABLE_scRNA_enhancergenes_enh, file="PVALUETABLE_enhancergenes_scRNAseq.txt", col.names=TRUE, row.names=FALSE, quote=FALSE)
+
+scatter<-ggplot(PVALUETABLE_scRNA_enhancergenes_enh, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=celltype, label=celltype)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Marker Genes in Enhancer Target Genes Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster", size="Number of Overlapping Markers") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=celltype), data=PVALUETABLE_scRNA_enhancergenes_enh) + geom_hline(yintercept=1.3) + scale_color_manual(values=c('epithelium' = '#ABA300', 'mesenchyme'='#F8766D', 'redbloodcells'='#0CB702', 'otherbloodcells'='#00A9FF', 'perivascularcell'='#FF61CC', 'endothelium'='#00BFC4'), guide=FALSE) + ylim(-0.1, 4.5) 
+
+pdf(file="Supplemental_figure_scatterplot_enhtargetgenes_enrichment_allcelltypes_scRNA.pdf", height=10, width=10)
+scatterallllll
+dev.off()
+
+PVALUETABLE_scRNA_topenhancergenes_enh_1<-PVALUETABLE_scRNA_enhancergenes[grep('enhancer|abnormal', PVALUETABLE_scRNA_enhancergenes$module, invert=TRUE),]
+PVALUETABLE_scRNA_topenhancergenes_enh_1$padj<-p.adjust(PVALUETABLE_scRNA_topenhancergenes_enh_1$pval, method="BH")
+PVALUETABLE_scRNA_topenhancergenes_enh_1$logpadj<-(-log10(PVALUETABLE_scRNA_topenhancergenes_enh_1$padj))
+PVALUETABLE_scRNA_topenhancergenes_enh_1$logpadj<-gsub('Inf', '4', PVALUETABLE_scRNA_topenhancergenes_enh_1$logpadj)
+write.table(PVALUETABLE_scRNA_topenhancergenes_enh_1, file="SupplementalTable_PVALUETABLE_scRNAmarkers_WGCNA.txt", sep='\t', quote=FALSE)
+
+scatterallllll<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enh_1, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module, shape=celltype)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Marker Genes in Module Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Module", shape="Cell Type", size="# Overlapping Marker Genes with Module") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enh_1, logpadj >= 1.3)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow')) + ggtitle('All WGCNA Modules and All Cell Types') 
+
+pdf(file="Supplemental_figure_scatterplot_WGCNA_enrichment_allcelltypes_scRNA.pdf", height=10, width=10)
+scatterallllll
+dev.off()
+
+PVALUETABLE_scRNA_topenhancergenes_enha<-PVALUETABLE_scRNA_topenhancergenes_enh_1[which(PVALUETABLE_scRNA_topenhancergenes_enh_1$celltype == 'epithelium'),]
+PVALUETABLE_scRNA_topenhancergenes_enhb<-PVALUETABLE_scRNA_topenhancergenes_enh_1[which(PVALUETABLE_scRNA_topenhancergenes_enh_1$celltype == 'ek'),]
+PVALUETABLE_scRNA_topenhancergenes_enhc<-PVALUETABLE_scRNA_topenhancergenes_enh_1[which(PVALUETABLE_scRNA_topenhancergenes_enh_1$celltype == 'endothelium'),]
+PVALUETABLE_scRNA_topenhancergenes_enhd<-PVALUETABLE_scRNA_topenhancergenes_enh_1[which(PVALUETABLE_scRNA_topenhancergenes_enh_1$celltype == 'mesenchyme'),]
+PVALUETABLE_scRNA_topenhancergenes_enhe<-PVALUETABLE_scRNA_topenhancergenes_enh_1[which(PVALUETABLE_scRNA_topenhancergenes_enh_1$celltype == 'otherbloodcell'),]
+PVALUETABLE_scRNA_topenhancergenes_enhf<-PVALUETABLE_scRNA_topenhancergenes_enh_1[which(PVALUETABLE_scRNA_topenhancergenes_enh_1$celltype == 'perivascularcell'),]
+
+
+scatter2a<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enha, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Enhancer Target Genes (Top 10% Connectivity) Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enha, logpadj >= 1.3 | logFCenrichment >= 1.0)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow'), guide=FALSE) + ggtitle('Epithelium') 
+scatter2b<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enhb, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Enhancer Target Genes (Top 10% Connectivity) Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enhb, logpadj >= 1.3 | logFCenrichment >= 1.0)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow'), guide=FALSE)  + ggtitle('Enamel Knot')
+scatter2c<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enhc, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Enhancer Target Genes (Top 10% Connectivity) Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enhc, logpadj >= 1.3 | logFCenrichment >= 1.0)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow'), guide=FALSE)  + ggtitle('Endothelium')
+scatter2d<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enhd, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Enhancer Target Genes (Top 10% Connectivity) Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enhd, logpadj >= 1.3 | logFCenrichment >= 1.0)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow'), guide=FALSE)  + ggtitle('Mesenchyme')
+scatter2e<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enhe, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Enhancer Target Genes (Top 10% Connectivity) Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enhe, logpadj >= 1.3 | logFCenrichment >= 1.0)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow'), guide=FALSE)  + ggtitle('Other Blood Cells')
+scatter2f<-ggplot(PVALUETABLE_scRNA_topenhancergenes_enhf, aes(x=logFCenrichment, y=as.numeric(logpadj), size=markersoverlap, color=module, label=module)) + theme(aspect.ratio=1) + xlab("Log Fold Enrichment of Enhancer Target Genes (Top 10% Connectivity) Vs Background") + ylab("Log Adjusted P Value") + geom_point() + labs(x="Fold Enrichment (Log2)", y="Adjusted P Value (-Log10)", colour="Cluster") + geom_label_repel(aes(logFCenrichment, as.numeric(logpadj), label=module), data=subset(PVALUETABLE_scRNA_topenhancergenes_enhf, logpadj >= 1.3 | logFCenrichment >= 1.0)) + geom_hline(yintercept=1.3) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow'))  + ggtitle('Perivascular Cells')
+
+netplot<-enrichplot::cnetplot(value_bp2, layout='circle', categorySize='p.adjust', circular=FALSE, color_category="red", color_gene="black", cex_label_category = 1.2, showCategory=5, node_label='all') + theme(aspect.ratio=1, legend.position='none', text = element_text(size = 14))
+pitx1<-FeaturePlot(tooth, features ='Pitx1', cols=c('grey', 'blue')) + theme(aspect.ratio = 1) + labs(title = "Pitx1") 
+umap<-DimPlot(tooth, group.by='idents', label=TRUE, cols=c('Epithelium' = '#ABA300', 'Mesenchyme'='#F8766D', 'Red Blood Cells'='#0CB702', 'Other Blood Cells'='#00A9FF', 'Perivascular Cells'='#FF61CC', 'Endothelium'='#00BFC4', 'Enamel Knot'='red'), raster=TRUE) + theme(aspect.ratio = 1, legend.position = "none") + ggplot2::theme(legend.position = "none")
+
+DOumap<- DimPlot(tooth, group.by="Disease", cols=c("#636B59", "#CDE2B8", "#90A5A9", "#00A36C", "#00FFFF", "#228B22", "#7CFC00", "#0000FF", "#088F8F", "#0096FF", "#B4C424", "#C4B454", "#DFFF00", "#96DED1"), label=TRUE, raster=TRUE) + theme(aspect.ratio = 1, legend.position = "none") + ggplot2::theme(legend.position = "none")
+
+motifdotplot<-VlnPlot(tooth, features=motif, pt.size=0, same.y.lims=TRUE, combine=TRUE) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12), aspect.ratio=1)
+
+EK<-FeaturePlot(tooth, features = c("Shh", "Cdkn1a"), blend = TRUE)
+
+
+figure<-(umap|DOumap)/(scatter|scatter2a|scatter2b)/(scatter2c|scatter2d|scatter2f)
+pdf(file='Figure4_singlecell_enhancers.pdf', height=15, width=15)
+figure
+dev.off()
