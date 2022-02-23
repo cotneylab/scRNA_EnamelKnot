@@ -1,0 +1,306 @@
+###prioritize gene 
+
+set.wd('~/cotney/analysis/bulkRNA/tooth')
+
+library(dplyr)
+
+set.seed(123)
+
+
+
+###load WGCNA results
+
+results<-read.table(file="WGCNA_genes_by_mod.txt")
+
+results<-results[grep('grey', results$ModuleColor, invert=TRUE),]
+
+x<-unique(results$ModuleColor)
+
+####load GWAS hg19 coordinates of craniofacial SNPs and identify the human genes which overlap within 500kb up and downstream of the SNP
+
+tab<-read.table(file="GWAS_facial_all.txt", sep='\t', header=TRUE)
+
+colnames(tab)[28]<-c("PVALUE")
+
+tab<-tab[grep("P-VALUE", tab$PVALUE, invert=TRUE), ]
+
+tab$PVALUE<-as.character(tab$PVALUE)
+
+tab<-tab[which(tab$PVALUE <= 5E-8),]
+
+tab$SNPS<-as.character(tab$SNPS)
+
+tab$CHR_ID<-as.character(tab$CHR_ID)
+
+tab$CHR_POS<-as.character(tab$CHR_POS)
+
+tab[grep(":", tab$SNPS),12]<-gsub(':.*|chr', '', tab[grep(":", tab$SNPS),22])
+
+tab[grep(":", tab$SNPS),13]<-gsub('.*:', '', tab[grep(":", tab$SNPS),22])
+
+tab<-tab[!(tab$CHR_POS==""),]
+
+tab$CHR_POS<-as.numeric(tab$CHR_POS)
+
+tab$CHR_POS_1<-tab$CHR_POS+250000
+
+####this file contains all the coordinates that we used for overlapping as well as metadata for the studies
+
+write.table(tab, file="SupplementalTable_GWAS_allfacialSNPs.txt", row.names=FALSE, quote=FALSE, col.names=TRUE)
+
+####convert it to a 500kbp padded bed file
+
+bed<-tab[,c(12,13,39,8)]
+
+bed$CHR_POS<-bed$CHR_POS-250000
+
+bed[which(bed$CHR_POS <= 0),2]<-0
+
+bed[which(bed$CHR_POS <= 0),3]<-500000
+
+bed$CHR_ID<- paste('chr', bed$CHR_ID, sep='')
+
+#########bed file of the SNPs above to be used for intersecting
+
+write.table(bed, file="GWAS_allfacialSNPS_hg19.bed", sep='\t', col.names=FALSE, row.names=FALSE, quote=FALSE)
+
+#########now intersect this bed file with the human hg19 coordinates of known genes
+
+system("bedtools intersect -a GWAS_allfacialSNPS_hg19.bed -b /home/FCAM/ewentworth/cotney/genome/hg19/hg19_genes_and_coordinates.bed -wb > hg19_genes_overlap_GWAS_allfacialSNPS.txt")
+
+######### now we obtain the mouse orthologs of these genes
+
+gwas<-read.delim(file="hg19_genes_overlap_GWAS_allfacialSNPS.txt", header=FALSE, sep='\t')
+
+convertHumanGeneList <- function(x){
+
+require("biomaRt")
+
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+
+humanx <- genesV2
+
+# Print the first 6 genes found to the screen
+
+print(head(humanx))
+
+return(humanx)
+
+}
+
+
+
+new_config <- httr::config(ssl_verifypeer = FALSE)
+
+httr::set_config(new_config, override = FALSE)
+
+
+
+human_disease <- convertHumanGeneList(unique(gsub(' ', '', gwas$V8)))
+
+colnames(human_disease)<-c('V1', 'V2')
+
+#####human_disease now contains the list of genes which are within 500kbp of a craniofacially relevant SNP
+
+####Start by marking markergenes. "Cluster Score" is if the gene appears as a marker for at least one cell type
+
+genes<-read.table(file='single_cell_marker_genes.txt')
+
+genes<-genes[,c(2,5,6,7)]
+
+genes<-genes[order(genes$avg_logFC, decreasing=TRUE),]
+
+genes = genes[!duplicated(genes$gene),]
+
+genes$Cluster_score<-1
+
+######genes which appear in dental-specific cell types get another point for being dentally relevant
+
+dentalrelevant<-c('Mesenchyme', 'Epithelium', 'Enamel Knot', 'Perivascular Cells')
+
+dentalrelevantgenes<-genes[which(genes$cluster %in% dentalrelevant),4]
+
+genes$Cluster_score[which(genes$gene %in% dentalrelevantgenes)]<-2
+
+###now we combine the marker list with the list of all genes above a certain expression threshold from WGCNA analysis
+
+results<-results[,c(1,3)]
+
+genes1<-data.frame(setdiff(results$Genes, genes$gene))
+
+colnames(genes1)[1]<-c('gene')
+
+genes1$p_val_adj<-1
+
+genes1$cluster<-c('none')
+
+genes1$avg_logFC<-0
+
+genes1$Cluster_score<-0
+
+genes<-rbind(genes, genes1)
+
+genes<-genes[order(genes$gene),]
+
+genes1<-unique(genes$gene)
+
+#####then we add in the number of TSEs assigned using proximity, and assign a TSE score based on the number of associated TSEs
+
+TSE_assignment<-read.table(file="TSEs_to_MARKERGENES.txt")
+
+targets<-TSE_assignment$V1
+
+genes1<-data.frame(setdiff(genes1, targets))
+
+genes1$V2<-0
+
+colnames(genes1)[1]<-c('V1')
+
+TSE_assignment<-rbind(TSE_assignment, genes1)
+
+TSE_assignment$TSE_Score <- 0
+
+TSE_assignment$TSE_Score[which(TSE_assignment$V2 == 0)] <- 0
+
+TSE_assignment$TSE_Score[which(TSE_assignment$V2 == 2 | TSE_assignment$V2 == 1)] <- 1
+
+TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 3 & TSE_assignment$V2 <= 4)] <- 2
+
+TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 5 & TSE_assignment$V2 <= 6)] <- 3
+
+TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 8)] <- 4
+
+
+
+genes<-merge(genes, TSE_assignment, by.x='gene', by.y='V1')
+
+colnames(genes)[6]<-c('TSEs')
+
+
+
+#####then we add in information about which module these genes fall into, and add a point based on enrichment of TSE target genes and dentally relevant DO in the module 
+
+genes<-merge(genes, results, by.x='gene', by.y='Genes')
+
+TSE_target_enriched_mods<-c('blue', 'purple', 'green', 'magenta', 'yellow', 'black', 'red', 'darkorange', 'orange', 'grey60', 'midnightblue', 'lightyellow', 'turquoise', 'lightcyan')
+
+Dental_DO_enriched_mods<-c('red', 'midnightblue', 'black', 'blue', 'darkorange', 'lightyellow', 'magenta', 'yellow', 'lightgreen', 'white')
+
+mods<-unique(append(TSE_target_enriched_mods, Dental_DO_enriched_mods))
+
+genes$Dental_DO_enriched_mods<-0
+
+genes$Dental_DO_enriched_mods[which(genes$ModuleColor %in% mods)]<-1
+
+
+
+#####now we add a point for each gene with a VISTA-validated TE within 1 megabase of the TSS
+
+validated_genes<-read.table(file="MARKERGENES_VISTAPOS_TOOTHENH.txt")
+
+validated_genes<-unique(validated_genes$V1)
+
+genes$Validated_VISTA_score<-0
+
+genes$Validated_VISTA_score[which(genes$gene %in% validated_genes)]<-1
+
+
+
+#####now we add a point for each gene whose HUMAN ORTHOLOG is located within 1MB of a significant craniofacially-relevant GWAS hit (facial measures, caries, odontogenesis, etc)
+
+genes$GWAS_Score<-0
+
+genes$GWAS_Score[which(genes$gene %in% human_disease$V2)]<-1
+
+####This part is not for scoring; it just annotates genes which have known dental phenotypes (to expedite analysis of the table)
+
+dis<-read.table(file='WGCNA/DISGENET_human_mouse_orthologs.txt', header=TRUE, sep=' ')
+
+Dental_DO_gene<-unique(dis$x)
+
+genes$Known_Dental_DO_gene<-0
+
+genes$Known_Dental_DO_gene[which(genes$gene %in% Dental_DO_gene)]<-1
+
+
+
+####mark genes which have had knockouts generated by komp (to expedite analysis of the table)
+
+g<-read.table(file="genotype-phenotype-assertions-ALL.csv", header=TRUE, sep=',')
+
+g<-as.character(unique(g$marker_symbol))
+
+genes$KOMP_KO<-0
+
+genes$KOMP_KO[which(genes$gene %in% g)]<-1
+
+
+
+####mark genes whose knockouts have a cf phenotype (KOMP results, to expedite analysis of the table)
+
+mousetooth<-read.table(file="all_face_morph_genes.txt", header=TRUE)
+
+mousetooth<-unique(mousetooth$Gene)
+
+genes$KOMP_CF_Pheno_gene<-0
+
+genes$KOMP_CF_Pheno_gene[which(genes$gene %in% mousetooth)]<-1
+
+
+
+####mark genes whose knockouts have a dental phenotype (KOMP results, to expedite analysis of the table)
+
+mousetooth<-read.table(file="abnormal_tooth_morphology_genes.txt", header=TRUE)
+
+mousetooth<-unique(mousetooth$Gene)
+
+genes$KOMP_Dental_Pheno_gene<-0
+
+genes$KOMP_Dental_Pheno_gene[which(genes$gene %in% mousetooth)]<-1
+
+
+
+
+
+#####calculate the final score based on the scores demonstrated above
+
+genes$Score<-genes$Cluster_score + genes$TSE_Score + genes$Dental_DO_enriched_mods + genes$Validated_VISTA_score + genes$GWAS_Score
+
+genes<-genes[order(genes$Score, genes$TSEs, decreasing=TRUE),]
+
+row.names(genes) <- 1:nrow(genes)
+
+genes <- genes %>% mutate(scoredecile = ntile(Score, 10))
+
+write.table(genes, file="Prioritized_Gene_List_all_genes.txt", quote=FALSE, row.names=FALSE, col.names=TRUE, sep='\t')
+
+###make file for top decile scoring genes, highest priority
+
+genes<-genes[which(genes$scoredecile == 10),]
+
+write.table(genes, file="Prioritized_Gene_List_topdecile.txt", quote=FALSE, row.names=FALSE, col.names=TRUE, sep='\t')
+
+
+
+
+
+####top decile genes which are not previously annotated as dental disease genes in humans
+
+genes<-genes[which(genes$Known_Dental_DO_gene == 0),]
+
+row.names(genes) <- 1:nrow(genes)
+
+genes[grep('Agap1', genes$gene),]
+
+write.table(genes, file="Novel_Prioritized_Gene_List.txt", quote=FALSE, row.names=FALSE, col.names=TRUE, sep='\t')
+
+
+
+
+
+
+
