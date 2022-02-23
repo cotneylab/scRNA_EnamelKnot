@@ -12,7 +12,7 @@ set.seed(123)
 
 results<-read.table(file="WGCNA_genes_by_mod.txt")
 
-results<-results[grep('grey', results$ModuleColor, invert=TRUE),]
+results<-results[-which(results$ModuleColor == "grey"),]
 
 x<-unique(results$ModuleColor)
 
