@@ -1,0 +1,542 @@
+library(WGCNA)
+options(stringsAsFactors = FALSE)
+# The following setting is important, do not omit.
+options(stringsAsFactors = FALSE)
+library(BisqueRNA)
+library(DESeq2)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(sleuth)
+set.seed(123)
+enableWGCNAThreads(nThreads =8)
+library(ggrepel)
+library(readr)
+library(ggplot2)
+library(sva)
+library(pheatmap)
+library(tidyverse)
+library(RColorBrewer)
+library(tximport)
+library(RUVSeq)
+######load samples from kallisto format using tximport
+samples2<-read.table(file="~/cotney/rawdata/GEO/mouse/embryonictoot/bulk_Lee/s2c.txt")
+samples2$V4<-c('batch2')
+samples<-read.table(file="~/cotney/rawdata/GEO/mouse/embryonictoot/bulkRNAseq/s2c.txt")
+samples$V4<-c('batch1')
+samples<-rbind(samples2, samples)
+samples$V1<-gsub('E', 'e', gsub("Set", "", samples$V1))
+samples$V2<-gsub('E', 'e', samples$V2)
+samples$V5<-gsub("e12.5|e15.5|e17.5|e13.5|e14.5|e16.5|_", "", samples$V2)
+#samples<-samples[grep('molar|incisor', samples$V5),]
+samples<-samples[order(samples$V2),]
+samples$V6<-gsub('e16.5', 'bell', gsub('e17.5', 'latebell', gsub('e15.5', 'bell', gsub('e14.5', 'cap', gsub('e13.5', 'bud', gsub("e12.5_molar", "bud", gsub("e12.5_incisor", "bud", samples$V2)))))))
+samples$V6<-gsub('.*_diastema','diastema',samples$V6)
+samples<-samples[grep('diastema', samples$V6, invert=TRUE),]
+files <- paste(as.vector(samples$V3), "/abundance.h5", sep="")
+all(file.exists(files))
+tr2g <- read_tsv("~/cotney/genome/mm10/STAR/mus_musculus/transcripts_to_genes.txt", col_names = c("transcript", "gene", "gene_symbol")) 
+t2g<-data.frame(tr2g$transcript, tr2g$gene_symbol)
+colnames(t2g)<-c("TXNAME", "GENESYM")
+library(tximport)
+txi.kallisto<-tximport(files, type="kallisto", txOut=FALSE, tx2gene=t2g, countsFromAbundance=c('no'))
+names(txi.kallisto)
+head(txi.kallisto$counts)
+names(txi.kallisto$infReps)
+dim(txi.kallisto$infReps$sample1)
+colnames(txi.kallisto$counts)<-samples$V1
+sampleTable <- data.frame(dex = factor(rep(c("e13_molar", "e14_molar", "e16_molar"), each = 7)))
+sampleTable2<-data.frame(dex = factor(rep(c("e12.5_incisor", "e12.5_molar", "e15.5_molar", "e17.5_molar"), each = 3)))
+sampleTable<-rbind(sampleTable2, sampleTable)
+sampleTable<-data.frame(sampleTable[order(sampleTable),])
+colnames(sampleTable)<-c("dex")
+rownames(sampleTable) <- as.factor(colnames(txi.kallisto$counts))
+sampleTable$id<-as.factor(rownames(sampleTable))
+sampleTable$batch <-as.factor(samples$V4)
+sampleTable$tissue<-as.factor(samples$V5)
+sampleTable$stage<-as.factor(gsub('_molar', '', samples$V6))
+sampleTable$batch<-as.factor(gsub('batch', '', sampleTable$batch))
+
+#####make the DESeq object, and correct for known batch effect using RUVSeq
+dds <- DESeqDataSetFromTximport(txi.kallisto, sampleTable, design = ~ batch)
+dds<-DESeq(dds)
+keep <- rowSums( counts(dds, normalized=TRUE) >= 5 ) >= 3
+dds<-dds[keep,]
+keep<-intersect(rownames(dds), rownames(tooth))
+dds<-dds[keep,]
+genes<-rownames(dds)
+#dds2<-dds[,c(1:6,8:33)]
+dds2<-dds
+#sampleTable2<-sampleTable[c(1:6,8:33),]
+sampleTable2<-sampleTable
+pdf(file="RUVseq_adjustment_after_exclusion.pdf")
+matrix<-counts(dds2, normalized=FALSE)
+x<-sampleTable2$stage
+seta <- newSeqExpressionSet(matrix, phenoData = sampleTable2)
+library(RColorBrewer)
+plotRLE(seta, outline=FALSE)
+plotPCA(seta, cex=1.2)
+seta <- betweenLaneNormalization(seta, which="upper")
+plotRLE(seta, outline=FALSE)
+plotPCA(seta, cex=1.2)
+design<-model.matrix(~x, data=pData(seta))
+y <- DGEList(counts=counts(seta), group=x)
+y <- calcNormFactors(y, method="upperquartile")
+y <- estimateGLMCommonDisp(y, design)
+y <- estimateGLMTagwiseDisp(y, design)
+fit <- glmFit(y, design)
+lrt <- glmLRT(fit, coef=2)
+top <- topTags(lrt, n=nrow(seta))$table
+empirical <- rownames(seta)[which(!(rownames(seta) %in% rownames(top)[1:5000]))]
+set2a <- RUVg(seta, empirical, k=1)
+pData(set2a)
+plotRLE(set2a, outline=FALSE, ylim=c(-4, 4))
+plotPCA(set2a, cex=1.2)
+set2a <- RUVg(seta, empirical, k=2)
+pData(set2a)
+plotRLE(set2a, outline=FALSE, ylim=c(-4, 4))
+plotPCA(set2a, cex=1.2)
+set2a <- RUVg(seta, empirical, k=3)
+pData(set2a)
+plotRLE(set2a, outline=FALSE, ylim=c(-4, 4))
+plotPCA(set2a, cex=1.2)
+set2a <- RUVg(seta, empirical, k=4)
+pData(set2a)
+plotRLE(set2a, outline=FALSE, ylim=c(-4, 4))
+plotPCA(set2a, cex=1.2)
+set2a <- RUVg(seta, empirical, k=5)
+pData(set2a)
+plotRLE(set2a, outline=FALSE, ylim=c(-4, 4))
+plotPCA(set2a, cex=1.2)
+dev.off()
+
+dds <- DESeqDataSetFromMatrix(countData=normCounts(set2a), pData(set2a), design = ~ W_1 + W_2 + dex)
+dds <- DESeq(dds, fitType='local', test = "LRT", reduced=~ W_2 )
+res <- results(dds)
+vsd <- vst(dds, blind = TRUE)
+rld <- rlog(dds, blind = TRUE)
+
+save(vsd, file="vsd.Rdata")
+
+###################################Start WGCNA
+#Step 1, filter the data
+#----------------------------------------------
+
+png("qc-dispersions.png", 1000, 1000, pointsize=20)
+plotDispEsts(dds, main="Dispersion plot")
+dev.off()
+
+vsd_data <- assay(vsd)
+
+
+# Colors for plots below
+library(RColorBrewer)
+colours = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+
+# Sample distance heatmap
+sampleDists <- as.matrix(dist(t(assay(vsd))))
+rownames(sampleDists) <- paste (vsd$sampleName)
+colnames(sampleDists) <- NULL 
+library(gplots)
+png("qc-heatmap-samples_vsd.png", w=1000, h=1000, pointsize=20)
+heatmap.2(as.matrix(sampleDists), trace="none",
+          col=colours,
+          margin=c(10, 10), main="Sample Distance Matrix")
+dev.off()
+
+png("qc-pca-samples_vsd.png", w=1000, h=1000, pointsize=20)
+vsd2<-vsd[,-c(4:7)]
+plotPCA(vsd2, intgroup=c("dex"))
+dev.off()
+pdf("qc-pca-samples_vsd.pdf", w=10, h=10)
+plotPCA(vsd, intgroup=c("dex"))
+plotPCA(vsd2, intgroup=c("dex"))
+dev.off()
+
+library( "genefilter" )
+topVarGenes <- head( order( rowVars( assay(vsd) ), decreasing=TRUE ), 250 )
+vsd4heatmap<-assay(vsd)[topVarGenes, ]
+colnames(vsd4heatmap)<-paste (vsd$sampleName)
+
+png("topVargene_vsd_heatmap.png", w=1000, h=1000, pointsize=20)
+heatmap.2( vsd4heatmap, key=T, scale="row", 
+         trace="none", dendrogram="column", cexRow = .2, cexCol = .5,
+         col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(255))
+dev.off()
+
+#transpose table for wgcna
+datExpr=data.frame(t(vsd_data))
+#get good genes/samples
+gsgdata = goodSamplesGenes(datExpr, verbose=3)
+gooddata = datExpr[gsgdata$goodSamples, gsgdata$goodGenes]
+
+
+#write
+write.table(gooddata,file="tooth_for_wgcna.txt",sep="\t",quote=F)
+
+#Step2, obtain power for each file
+#----------------------------------------------
+infile<-c("tooth_for_wgcna.txt") #filtered expression file
+
+r2cutoff<-0.90
+
+#outfiles
+outfile1<-sub(".txt","_tree.pdf",infile) #tree figure
+outfile2<-sub(".txt","_power.pdf",infile) #power figure
+outfile3<-sub(".txt","_power.txt",infile) #power file
+outfile4<-sub(".txt","_step2_power.rdata",infile) #rdata
+
+data<-read.table(file=infile,header=T,row.names=1,sep="\t",as.is=T,check.names=F)
+library(flashClust)
+sampleTree = flashClust(dist(data), method = "average");
+pdf(outfile1)
+par(cex = 0.9);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = paste("Sample clustering to detect outliers for ",infile,sep=""), sub="", xlab="", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+dev.off()
+
+#make sure to trim the tree for outliers!
+
+clust = cutreeStatic(sampleTree, cutHeight = 45, minSize = 10)
+table(clust)
+# clust 1 contains the samples we want to keep.
+keepSamples = (clust==1)
+data = data[keepSamples, ]
+nGenes = ncol(data)
+nSamples = nrow(data)
+
+
+sampleTree = flashClust(dist(data), method = "average");
+pdf(outfile1)
+par(cex = 0.9);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = paste("Sample clustering to detect outliers for ",infile,sep=""), sub="", xlab="", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+dev.off()
+
+sample<-as.dendrogram(sampleTree)
+
+#define power
+powers = c(c(1:10), seq(from = 12, to=30, by=2))
+sft = pickSoftThreshold(data, powerVector = powers, verbose = 5)
+
+pdf(outfile2,width = 9, height = 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+r2<- -sign(sft$fitIndices[,3])*sft$fitIndices[,2]
+plot(sft$fitIndices[,1], r2,
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+    main = paste("Scale independence for ",infile,sep=""));
+text(sft$fitIndices[,1], r2,
+    labels=powers,cex=cex1,col="red");
+abline(h=r2cutoff,col="red")
+
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+    xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+    main = paste("Mean connectivity for ",infile,sep=""))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+dev.off()
+
+#mark power to passing R2 cutoff
+write.table(sft$fitIndices,file=outfile3,quote=F,sep="\t")
+
+#save image for future use
+save.image(outfile4)
+
+#########################using about 17.7K genes
+
+
+
+#Step3, build network, and write module assignment and dendrogram
+#----------------------------------------------
+
+#FROM HERE EXIT R AND RESTART, ONLY LOADING WGCNA. but make sure to reload the sft
+library(WGCNA)
+options(stringsAsFactors = FALSE)
+# The following setting is important, do not omit.
+options(stringsAsFactors = FALSE)
+enableWGCNAThreads()
+set.seed(123)
+
+infile<-"tooth_for_wgcna.txt" #filtered expression file
+npower<-8 #decided from the above analysis
+cex1 = 0.9
+data<-read.table(file=infile,header=T,row.names=1,sep="\t",as.is=T,check.names=F)
+r2cutoff<-0.85
+powers = c(c(1:20), seq(from = 12, to=30, by=2))
+sft = pickSoftThreshold(data, powerVector = powers, verbose = 5)
+
+outfile1<-sub(".txt","_module.txt",infile) #genes to color/module
+outfile2<-sub(".txt","_dendro.pdf",infile) #colored dendrogram figure
+outfile3<-sub(".txt","_step3_network.rdata",infile) #rdata
+outfile4<-sub(".txt","_TOM",infile) #rdata for TOM
+
+r2<- -sign(sft$fitIndices[,3])*sft$fitIndices[,2]
+
+
+#parameters to change
+no.maxBlockSize=20000
+
+
+#using 8 threads to calculate the modules
+bwnet = blockwiseModules(data, maxBlockSize = no.maxBlockSize, power=npower,
+                     TOMType = "unsigned", minModuleSize = 50,
+                     mergeCutHeight = 0.25, deepSplit=2,
+                     numericLabels = TRUE, pamRespectsDendro = FALSE,
+                     saveTOMs = FALSE, verbose = 3, nThreads=38)
+
+
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+dev.off()
+
+
+#scaleFreePlot(TOM)
+
+#save module assignment
+# Convert labels to colors for plotting
+bwModuleGroups<-bwnet$colors
+bwModuleColors = labels2colors(bwnet$colors)
+
+#results
+results<-cbind(colnames(data),bwModuleGroups,bwModuleColors,bwnet$blocks)
+colnames(results)<-c("Genes","ModuleAssignment","ModuleColor","Blocks")
+write.table(results,file=outfile1,sep="\t",quote=F,col.names=NA)
+
+#plot dendrogram
+pdf(outfile2)
+plotDendroAndColors(bwnet$dendrograms[[1]], bwModuleColors[bwnet$blockGenes[[1]]], "Module colors",
+dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05)
+dev.off()
+
+save.image(outfile3)
+
+#TOMSimilarity
+
+sizeGrWindow(7,7)
+TOMplot(bwnet, bwnet$dendrograms, as.character(bwModuleColors))
+dev.off()
+
+#Step 4, calculate correlation and intra module connectivity, export hub genes
+#----------------------------------------------
+
+
+matfile<-data #signal mat
+modulefile<-sub(".txt","_module.txt",infile) #module assignment
+
+outfile1<-sub(".txt","_all_con.txt",infile) #genes to connectivity
+outfile2<-sub(".txt","_all_con.rdata",infile) #rdata
+
+#data<-read.table(file=matfile,header=T,row.names=1,sep="\t",as.is=T,check.names=F)
+modules<-read.table(file=modulefile,header=T,row.names=1,sep="\t",as.is=T,check.names=F)
+
+module.cor<-list()
+all.con<-c()
+top10<-c()
+top25<-c()
+top50<-c()
+
+for (module in unique(modules[,3])) {
+	ADJ=cor(data[,modules[,3]==module],use="p")
+	ADJ1=abs(ADJ)^npower
+	module.cor[[as.character(module)]]<-ADJ
+	#weighted k
+	Alldegrees1=intramodularConnectivity(ADJ1, modules[modules[,3]==module,3])
+	Alldegrees1<-Alldegrees1[order(Alldegrees1$kWithin),]
+	#unweighted k
+	Alldegrees2=intramodularConnectivity(abs(ADJ), modules[modules[,3]==module,3])
+	Alldegrees1$ModuleColor<-module
+	Alldegrees2<-Alldegrees2[order(Alldegrees2$kWithin),]
+	all.con<-rbind(all.con,cbind(Alldegrees1,Alldegrees2))
+	len<-length(rownames(Alldegrees1))
+	Alldegrees1top10<-tail(Alldegrees1, round(len/10))
+	top10<-rbind(top10, Alldegrees1top10)
+	Alldegrees1top25<-tail(Alldegrees1, round(len/4))
+	top25<-rbind(top25, Alldegrees1top25)
+	Alldegrees1top50<-tail(Alldegrees1, round(len/2))
+	top50<-rbind(top50, Alldegrees1top50)
+}
+
+all.con<-all.con[order(rownames(all.con)),]
+colnames(all.con)<-c(paste(colnames(all.con)[1:4],"Signed",sep="-"),paste(colnames(all.con)[5:8],"Unsigned",sep="-"))
+
+write.table(file=outfile1,all.con,sep="\t",quote=F)
+write.table(top10, file="module_assignments_hubgenes_top10.txt", sep='\t')
+write.table(top50, file="module_assignments_hubgenes_top50.txt", sep='\t')
+write.table(top25, file="module_assignments_hubgenes_top25.txt", sep='\t')
+
+save.image(outfile2)
+
+
+#Step 5, export gene network
+#----------------------------------------------
+
+cor.cutoff<-0.75
+module.sel<-2 #selected module to export
+
+module.sel.cor<-module.cor[[module.sel]]
+genes.sel<-c()
+results<-c()
+
+for(num1 in 1:(ncol(module.sel.cor)-1)) {
+	for (num2 in (num1+1):ncol(module.sel.cor)) {
+		if(abs(module.sel.cor[num1,num2])>=cor.cutoff) {
+			results<-rbind(results,c(colnames(module.sel.cor)[num1],colnames(module.sel.cor)[num2],module.sel.cor[num1,num2]))
+			genes.sel<-c(genes.sel,colnames(module.sel.cor)[num1],colnames(module.sel.cor)[num2])
+		}
+	}
+}
+cat(paste(length(unique(genes.sel))," out of ",ncol(module.sel.cor) ,"genes in the network",sep=""))
+
+write.table(results,file="tooth_module2_cor0.5_network.txt",sep="\t",quote=F,row.names =F,col.names =F)
+
+#Multidimensional Scaling of genes in all the modules
+
+module.sel.cor<-module.cor[[as.character(module.sel)]]
+module.cmdscale<-cmdscale(as.dist(1-module.sel.cor),k=1)
+
+colnames(module.cmdscale)<-c("Axis1","Axis2","Axis3")
+ 
+write.table(module.cmdscale,file="tooth_module1_cmd.txt",sep="\t",quote=F,col.names=NA)
+
+
+#Step 6, network of modules by module eigengene 
+#----------------------------------------------
+
+
+cor.cutoff<- 0.75 #cut off for the linkage of modules on network
+
+datME=moduleEigengenes(data,bwnet$colors)$eigengenes
+
+write.table(datME,file="tooth_eigengene.txt",sep="\t",quote=F,col.names=NA)
+
+eigen<-read.table("tooth_eigengene.txt",header=T,row.names=1,sep="\t")
+
+#correlation
+eigen.cor<-cor(eigen,method="pearson")
+
+#MultiDimensional Scaling
+module.eigen.cmdscale<-cmdscale(as.dist(1-eigen.cor),k=3)
+
+write.table(file="tooth_cmd_formodules.txt",module.eigen.cmdscale*500,sep="\t",quote=F,col.names=NA)
+
+#export links
+
+genes.sel<-c()
+results<-c()
+
+for(num1 in 1:(ncol(eigen.cor)-1)) {
+	for (num2 in (num1+1):ncol(eigen.cor)) {
+		if(abs(eigen.cor[num1,num2])>=cor.cutoff) {
+			results<-rbind(results,c(colnames(eigen.cor)[num1],colnames(eigen.cor)[num2],eigen.cor[num1,num2]))
+			genes.sel<-c(genes.sel,colnames(eigen.cor)[num1],colnames(eigen.cor)[num2])
+		}
+	}
+}
+
+#Write file for CytoScape
+interaction.type<-results[,3]
+interaction.type[interaction.type>0]=1
+interaction.type[interaction.type<0]=-1
+
+results<-cbind(results,interaction.type)
+
+cat(paste(length(unique(genes.sel))," out of ",ncol(eigen.cor) ," modules in the network\n",sep=""))
+#file that can be imported to Cytoscape
+write.table(results,file="tooth_cor0.5_modulecor.txt",sep="\t",quote=F,row.names =F,col.names =F)
+
+
+
+
+
+
+########Step 7: eigengene trajectory analysis
+library(stats)
+#use the vsd file for pca to generate pc1 coordinates (approximate time component)
+load(file="vsd.Rdata")
+
+png("qc-pca-samples_vsd.png", w=1000, h=1000, pointsize=20)
+vsd2<-vsd
+plotPCA(vsd2, intgroup=c("dex"))
+dev.off()
+pdf("qc-pca-samples_vsd.pdf", w=10, h=10)
+plotPCA(vsd, intgroup=c("dex"))
+plotPCA(vsd2, intgroup=c("dex"))
+dev.off()
+vsd2<-assay(vsd)
+
+pca<-prcomp(t(vsd2), center=TRUE)
+coord.1<-pca$x[,1]
+
+library(ggplot2)
+library(ggsignif)
+library(reshape2)
+timescore<-read.table("tooth_eigengene.txt", header=TRUE)
+bwModuleGroups<-results$ModuleAssignment
+bwModuleColors <-results$ModuleColor
+tab<-as.data.frame(table(results$ModuleAssignment, results$ModuleColor))
+tab<-tab[which(!tab$Freq == 0 ),]
+tab<-tab[order(tab$Var1),]
+colnames(timescore)<-tab$Var2
+data<-melt(t(timescore))
+colnames(data)<-c('Module', 'Sample', 'Score')
+order<-c('e12.5_molar', 'e12.5_incisor', 'e13.5_molar', 'e14.5_molar', 'e15.5_molar', 'e16.5_molar', 'e17.5_molar')
+
+data$dex<-gsub('molar_.*', 'molar', gsub('incisor_.*', 'incisor', data$Sample))
+data$dex<-factor(data$dex, order)
+
+data$PC1<-coord.1[data$Sample]
+colors<-as.character(unique(data$Module))
+colors<-colors[order(colors)]
+data$Module<-factor(data$Module, colors)
+noicemods<-gsub('_top10', '', unique(combined_PVALUETABLE[which(combined_PVALUETABLE$padj <= 0.05),2]))
+data2<-data[which(data$Module %in% noicemods),]
+colors<-as.character(unique(data2$Module))
+colors<-colors[order(colors)]
+data2$Module<-factor(data2$Module, colors)
+colors<-as.character(unique(data$Module))
+colors<-colors[order(colors)]
+data$Module<-factor(data$Module, colors)
+write.table(data, file="WGCNA_timeseries.txt", row.names=FALSE, col.names=TRUE, quote=FALSE)
+#data2$PC1<-factor(as.character(data2$PC1))
+
+pdf(file="WGCNA_module_timeseries.pdf", height=30, width=30)
+ggplot(data, aes(x=dex, y=Score, group=Module, color=Module)) + geom_point() + geom_smooth(aes(group=Module)) + facet_wrap(. ~ Module, ncol=8, scales="free")+ scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow')) + ggtitle('WGCNA Module Eigengene Scores Over Time') + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12), aspect.ratio=1)
+
+ggplot(data2, aes(x=dex, y=Score, group=Module, color=Module)) + geom_point() + geom_smooth(se=FALSE, aes(group=Module)) + scale_color_manual(values=c("black", "blue", 'darkorange','green', 'grey60','lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'purple', 'red', 'turquoise', 'white', 'yellow')) + ggtitle('WGCNA Module Eigengene Scores Over Time') + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12), aspect.ratio=1)
+
+pc<-melt(pca$x)
+order<-c('e12.5_molar', 'e12.5_incisor', 'e13.5_molar', 'e14.5_molar', 'e15.5_molar', 'e16.5_molar', 'e17.5_molar')
+pc$dex<-gsub('molar_.*', 'molar', gsub('incisor_.*', 'incisor', pc$Var1)) 
+pc$dex<-factor(pc$dex, order)
+
+ggplot(pc, aes(x=dex, y=value, group=Var2, color=dex)) + geom_point() + geom_smooth(aes(group=Var2)) + facet_wrap(. ~ Var2, ncol=8, scales="free") + ggtitle('PC Values vs Developmental Time')+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.text=element_text(size=12), aspect.ratio=1)
+
+ggplot(data, aes(x=PC1, y=Score, group=Module, color=Module)) + geom_smooth(se=FALSE, aes(group=Module)) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow')) + ggtitle('WGCNA Module Eigengene Scores Over PC1') + facet_wrap(. ~ Module, ncol=4, scales="free")
+
+ggplot(data2, aes(x=PC1, y=Score, group=Module, color=Module)) + geom_smooth(se=FALSE, aes(group=Module)) + scale_color_manual(values=c("black", "blue", 'darkorange','green', 'grey60', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'purple', 'red', 'turquoise', 'white', 'yellow')) + ggtitle('WGCNA Module Eigengene Scores Over PC1')
+
+dev.off()
+
+
+
+pdf(file="WGCNA_module_timeseries_forFigure3.pdf", height=30, width=30)
+ggplot(data2, aes(x=PC1, y=Score, group=Module, color=Module)) + geom_smooth(se=FALSE, aes(group=Module)) + scale_color_manual(values=c("black", "blue", 'darkorange','green', 'grey60','lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'purple', 'red', 'turquoise', 'white', 'yellow')) + ggtitle('WGCNA Module Eigengene Scores Over PC1')
+dev.off()
+
+
+pdf(file="SupplementalFigure_WGCNA_timeseries_ALLMODULES.pdf", height=30, width=30)
+ggplot(data, aes(x=PC1, y=Score, group=Module, color=Module)) + geom_smooth(se=FALSE, aes(group=Module)) + scale_color_manual(values=c("black", "blue", 'brown', 'cyan', 'darkgreen', 'darkgrey', 'darkorange', 'darkred', 'darkturquoise', 'green', 'greenyellow', 'grey', 'lightgrey', 'lightcyan', 'lightgreen', 'lightyellow', 'magenta', 'midnightblue', 'orange', 'pink', 'purple', 'red', 'royalblue', 'salmon', 'tan', 'turquoise', 'white', 'yellow')) + ggtitle('WGCNA Module Eigengene Scores Over PC1') + facet_wrap(. ~ Module, ncol=4, scales="free")
+dev.off()
+
