@@ -172,7 +172,7 @@ TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 3 & TSE_assignment$V2 <= 4)]
 
 TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 5 & TSE_assignment$V2 <= 6)] <- 3
 
-TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 8)] <- 4
+TSE_assignment$TSE_Score[which(TSE_assignment$V2 >= 7)] <- 4
 
 
 
