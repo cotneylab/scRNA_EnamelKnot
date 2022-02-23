@@ -1,0 +1,48 @@
+#x is a list of the sets you're asking for enrichment within; input a list of the names of objects containing vectors of gene names. object names should contain "_Genes" to keep everything straight.
+#y is a list of the interrogation sets you're asking about enrichment OF (smaller set); input a list of names of objects containing vectors of gene names.
+#z is the background set (all genes in the dds object or rds object or all wgcna modules); input is the name of the object that contains vector of all gene names for background pool 
+library(gplot)
+library(eulerr)
+library(ggplot2)
+library(ggplotify)
+EnrichmentPvalueTable<-function(x, y, z){
+PVALUETABLE<-c()
+pdf(file=paste(x, y, "Enrichment_Permutation_and_Venn.pdf", sep=''), height=15, width=10)
+for (NODENAME3 in x){
+NODENAME2<-paste(gsub('_Genes', '', NODENAME3), ' Genes', sep='')
+NODENAME<-get(NODENAME3)
+for(timepoints in y){
+timepoint<-get(timepoints)
+timepointnames<-gsub('markers|_Genes', ' Genes', timepoints)
+completely_contained1 <- euler(c("A" = length(setdiff(NODENAME, timepoint)), "B" = length(setdiff(timepoint, NODENAME)), "A&B" = (length(NODENAME) - length(setdiff(NODENAME, timepoint)))))
+p3<-as.ggplot(plot(completely_contained1, labels = c(NODENAME2, timepointnames), fills = list(fill=c("red", "purple"), alpha=0.3), quantities=TRUE, legend=FALSE))
+p3<-p3+theme(aspect.ratio=1)
+len<-length(NODENAME)
+d<-NULL
+for (i in 1:10000){
+markers<-sample(z,len)
+d<-rbind(d, length(intersect(markers, timepoint)))
+}
+t<-table(d)
+d<-as.data.frame(d)
+colnames(d)<-c("name")
+pvalue<-c()
+pvalue$pval<-length(which(d$name >= length(intersect(NODENAME, timepoint))))/10000
+pvalue$module<-gsub(' Genes', '', NODENAME2)
+pvalue$celltype<-gsub(' Genes', '', timepointnames)
+pvalue$markersoverlap<-length(intersect(NODENAME, timepoint))
+pvalue$markersexpectedoverlap<-median(d$name)
+pvalue$logFCenrichment<-log((length(intersect(NODENAME, timepoint))+1)/(median(d$name)+1))
+pvalue$logpval<-(-log10(pvalue$pval))
+pvalue<-as.data.frame(pvalue)
+PVALUETABLE<-rbind(PVALUETABLE, pvalue)
+line<-length(intersect(timepoint, NODENAME))+5
+print(plot(t, xlim=c(1,line)))
+print(abline(v=length(intersect(timepoint, NODENAME))))
+print(labs(main=paste("Number of Overlapping Genes From Random Sampling of", len, "Genes", sep=" "), xlab="Number of Overlapping Genes with Marker Genes of Cell Type", ylab="Frequency"))
+}
+}
+dev.off()
+return(PVALUETABLE)
+}
+
