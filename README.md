@@ -3,7 +3,7 @@ Welcome to our github respository of analyses on the developing mouse tooth!
 
 This respository contains the scripts used on ChIPseq data of E13.5 incisors, bulk RNAseq of E12.5-E17.5 molars and E12.5 incisors, scRNA-seq of E14 molars, and compiled human GWAS data for dental and craniofacial phenotypes and diseases.
 
-For exploration of the data itself, please visit our laboratory website (https://cotney.research.uchc.edu/scrna-mouse-molar/).
+For exploration of the data itself, please visit our laboratory website (https://cotney.research.uchc.edu/tooth/).
 
 To understand our processes, follow this general outline:
 1. GREGOR_Caries.sh details our GWAS enrichment analyses using GREGOR. 
